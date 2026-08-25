@@ -105,3 +105,10 @@ footer { color:#6e7884; font-size:11px; line-height:1.5; text-align:center; padd
   .advanced-grid { grid-template-columns:1fr; }
   .camera-hud span { font-size:9px; }
 }
+
+/* v4: Mehrfachziele + Hochgeschwindigkeits-Scan */
+.target-editor { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:start; }
+.target-editor .plate-list { grid-column:1 / -1; min-height:118px; resize:vertical; line-height:1.35; letter-spacing:.055em; font-size:20px; }
+.target-meta { display:flex; flex-wrap:wrap; gap:8px 14px; color:var(--muted); font-size:12px; align-self:center; }
+.target-meta span:first-child { color:var(--accent); font-weight:800; }
+@media (max-width:560px){ .target-editor { grid-template-columns:1fr; } .target-editor .button { width:100%; } }

@@ -10,9 +10,9 @@
   <title>Kennzeichen-Wächter</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=3" />
+  <link rel="stylesheet" href="styles.css?v=4" />
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script defer src="app.js?v=3"></script>
+  <script defer src="app.js?v=4"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -84,9 +84,10 @@
     </section>
 
     <section class="control-card">
-      <label class="field-label" for="targetPlate">Gesuchtes Kennzeichen</label>
-      <div class="plate-input-row">
-        <input id="targetPlate" class="plate-input" value="NB-BC 721" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+      <label class="field-label" for="targetPlates">Gesuchte Kennzeichen</label>
+      <div class="target-editor">
+        <textarea id="targetPlates" class="plate-input plate-list" rows="4" autocomplete="off" autocapitalize="characters" spellcheck="false">NB-BC 721</textarea>
+        <div class="target-meta"><span id="targetCount">1 Zielkennzeichen</span><span>Ein Kennzeichen pro Zeile</span></div>
         <button id="testAlarmBtn" class="button secondary" type="button">Alarm testen</button>
       </div>
 
@@ -121,10 +122,13 @@
           <label>
             Scan-Intervall
             <select id="scanInterval">
-              <option value="900">0,9 s</option>
-              <option value="1300" selected>1,3 s</option>
-              <option value="1800">1,8 s</option>
-              <option value="2500">2,5 s</option>
+              <option value="0" selected>Maximal · sofort nächstes Bild</option>
+              <option value="100">mind. 0,10 s</option>
+              <option value="200">mind. 0,20 s</option>
+              <option value="300">mind. 0,30 s</option>
+              <option value="500">mind. 0,50 s</option>
+              <option value="750">mind. 0,75 s</option>
+              <option value="1000">mind. 1,00 s</option>
             </select>
           </label>
           <label>
@@ -141,9 +145,13 @@
 
     <section class="telemetry-card">
       <div class="metric"><span>Letzte OCR</span><strong id="lastOcr">—</strong></div>
+      <div class="metric"><span>Nächstes Ziel</span><strong id="closestTarget">—</strong></div>
       <div class="metric"><span>Ähnlichkeit</span><strong id="similarity">—</strong></div>
+      <div class="metric"><span>OCR-Zeit</span><strong id="ocrTime">—</strong></div>
+      <div class="metric"><span>Effektive Rate</span><strong id="effectiveRate">—</strong></div>
       <div class="metric"><span>Scans</span><strong id="scanCount">0</strong></div>
       <div class="metric"><span>Treffer</span><strong id="hitCount">0</strong></div>
+      <div class="metric"><span>Ziele aktiv</span><strong id="activeTargets">1</strong></div>
     </section>
 
     <section class="log-card">

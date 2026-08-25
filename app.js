@@ -4,7 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     video: $('video'), canvas: $('captureCanvas'), stage: $('cameraStage'), start: $('startBtn'), stop: $('stopBtn'),
-    target: $('targetPlate'), tolerant: $('tolerantMode'), wake: $('wakeLockToggle'),
+    targets: $('targetPlates'), targetCount: $('targetCount'), activeTargets: $('activeTargets'), closestTarget: $('closestTarget'), ocrTime: $('ocrTime'), effectiveRate: $('effectiveRate'), tolerant: $('tolerantMode'), wake: $('wakeLockToggle'),
     interval: $('scanInterval'), roiMode: $('roiMode'), status: $('statusPill'),
     placeholder: $('placeholder'), overlay: $('hitOverlay'), hitPlate: $('hitPlate'), scanFrame: $('scanFrame'),
     lastOcr: $('lastOcr'), similarity: $('similarity'), scanCount: $('scanCount'),
@@ -22,10 +22,13 @@
   let running = false;
   let busy = false;
   let scanTimer = null;
+  let videoFrameRequest = null;
+  let lastScanStartedAt = 0;
+  let scanRateEma = 0;
   let wakeLock = null;
   let scans = 0;
   let hits = 0;
-  let lastHitAt = 0;
+  let lastHitAt = new Map();
   let audioCtx = null;
   let capabilities = {};
   let supportedConstraints = {};
@@ -40,10 +43,49 @@
     .replace(/[^A-Z0-9]/g, '');
 
   const prettyPlate = (s) => {
-    const n = normalize(s);
-    const m = n.match(/^([A-Z]{1,3})([A-Z]{1,2})(\d{1,4})$/);
-    return m ? `${m[1]}-${m[2]} ${m[3]}` : (s || n);
+    const raw = String(s || '').trim().toUpperCase();
+    if (/[-\s]/.test(raw)) return raw.replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-');
+    return raw || normalize(s);
   };
+
+  function getTargets() {
+    const seen = new Set();
+    const values = (els.targets.value || '')
+      .split(/\n|,|;/)
+      .map((v) => v.trim())
+      .filter(Boolean)
+      .map((v) => ({ raw: v, normalized: normalize(v) }))
+      .filter((v) => v.normalized.length >= 3)
+      .filter((v) => {
+        if (seen.has(v.normalized)) return false;
+        seen.add(v.normalized);
+        return true;
+      });
+    return values;
+  }
+
+  function updateTargetCount() {
+    const count = getTargets().length;
+    els.targetCount.textContent = `${count} Zielkennzeichen`;
+    els.activeTargets.textContent = String(count);
+    localStorage.setItem('plateTargets', els.targets.value);
+  }
+
+  function bestTargetMatch(raw, targets) {
+    let bestOverall = null;
+    for (const target of targets) {
+      const candidate = bestCandidate(raw, target.normalized);
+      const denom = Math.max(target.normalized.length, candidate.value.length || 1);
+      const similarity = Math.max(0, Math.round((1 - candidate.distance / denom) * 100));
+      const item = { ...candidate, target, similarity };
+      if (!bestOverall || item.distance < bestOverall.distance ||
+          (item.distance === bestOverall.distance && item.similarity > bestOverall.similarity)) {
+        bestOverall = item;
+      }
+      if (candidate.distance === 0) break;
+    }
+    return bestOverall;
+  }
 
   const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
   const fmt = (n, digits = 1) => Number(n).toLocaleString('de-DE', { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -188,6 +230,7 @@
     capabilities = {};
     try { capabilities = track && track.getCapabilities ? track.getCapabilities() : {}; } catch (_) { capabilities = {}; }
     const settings = track && track.getSettings ? track.getSettings() : {};
+    if (settings.frameRate) els.cameraResolution.textContent = `${els.video.videoWidth || settings.width || '—'} × ${els.video.videoHeight || settings.height || '—'} · ${Math.round(settings.frameRate)} fps`;
 
     const zoomCap = capabilities.zoom;
     hardwareZoom = !!(zoomCap && Number.isFinite(zoomCap.min) && Number.isFinite(zoomCap.max) && zoomCap.max > zoomCap.min);
@@ -249,7 +292,7 @@
         facingMode: { ideal: 'environment' },
         width: { ideal: 1920 },
         height: { ideal: 1080 },
-        frameRate: { ideal: 30, max: 30 }
+        frameRate: { ideal: 60, max: 60 }
       }
     });
     track = stream.getVideoTracks()[0];
@@ -298,7 +341,7 @@
     const w = view.w * r.w;
     const h = view.h * r.h;
 
-    const maxW = 1280;
+    const maxW = 960;
     const scale = Math.min(1, maxW / w);
     const outW = Math.max(320, Math.round(w * scale));
     const outH = Math.max(100, Math.round(h * scale));
@@ -409,28 +452,63 @@
     }
   }
 
+  function scheduleNextScan(previousDuration = 0) {
+    if (!running) return;
+    const minInterval = Math.max(0, Number(els.interval.value) || 0);
+    const wait = Math.max(0, minInterval - previousDuration);
+    clearTimeout(scanTimer);
+    scanTimer = setTimeout(() => {
+      if (!running) return;
+      const run = () => scanOnce();
+      if ('requestVideoFrameCallback' in HTMLVideoElement.prototype && els.video.requestVideoFrameCallback) {
+        videoFrameRequest = els.video.requestVideoFrameCallback(() => run());
+      } else {
+        run();
+      }
+    }, wait);
+  }
+
   async function scanOnce() {
     if (!running || busy || !worker) return;
     busy = true;
+    const started = performance.now();
+    const previousScanStartedAt = lastScanStartedAt;
+    lastScanStartedAt = started;
     try {
       const frame = cropFrame();
       if (!frame) return;
       const result = await worker.recognize(frame);
+      const duration = performance.now() - started;
       scans += 1;
       els.scanCount.textContent = String(scans);
+      els.ocrTime.textContent = `${Math.round(duration)} ms`;
+      const cycleMs = previousScanStartedAt > 0 ? started - previousScanStartedAt : duration;
+      const instRate = cycleMs > 0 ? 1000 / cycleMs : 0;
+      scanRateEma = scanRateEma ? scanRateEma * 0.75 + instRate * 0.25 : instRate;
+      els.effectiveRate.textContent = `${scanRateEma.toFixed(1).replace('.', ',')} /s`;
 
-      const target = normalize(els.target.value);
-      const best = bestCandidate(result.data.text, target);
-      els.lastOcr.textContent = best.value || '—';
-      const similarity = target.length ? Math.max(0, Math.round((1 - best.distance / Math.max(target.length, best.value.length || 1)) * 100)) : 0;
-      els.similarity.textContent = Number.isFinite(similarity) ? `${similarity} %` : '—';
+      const targets = getTargets();
+      els.activeTargets.textContent = String(targets.length);
+      if (!targets.length) {
+        els.lastOcr.textContent = '—';
+        els.closestTarget.textContent = 'Keine Ziele';
+        els.similarity.textContent = '—';
+        return;
+      }
+
+      const best = bestTargetMatch(result.data.text, targets);
+      els.lastOcr.textContent = best?.value || '—';
+      els.closestTarget.textContent = best ? prettyPlate(best.target.raw) : '—';
+      els.similarity.textContent = best ? `${best.similarity} %` : '—';
 
       const allowed = els.tolerant.checked ? 1 : 0;
-      if (target && best.value && best.distance <= allowed) {
+      if (best && best.value && best.distance <= allowed) {
+        const key = best.target.normalized;
         const now = Date.now();
-        if (now - lastHitAt > 5000) {
-          lastHitAt = now;
-          await registerHit(best.value);
+        const previousHit = lastHitAt.get(key) || 0;
+        if (now - previousHit > 5000) {
+          lastHitAt.set(key, now);
+          await registerHit(best.target.raw, best.value);
         }
       }
       if (running) setStatus('Scan aktiv', 'active');
@@ -438,14 +516,16 @@
       console.error(err);
       setStatus('OCR-Fehler', 'idle');
     } finally {
+      const elapsed = performance.now() - started;
       busy = false;
+      if (running && worker) scheduleNextScan(elapsed);
     }
   }
 
-  async function registerHit(recognized) {
+  async function registerHit(targetRaw, recognized) {
     hits += 1;
     els.hitCount.textContent = String(hits);
-    const plate = prettyPlate(els.target.value);
+    const plate = prettyPlate(targetRaw);
     els.hitPlate.textContent = plate;
     els.overlay.hidden = false;
     setStatus('TREFFER', 'hit');
@@ -474,6 +554,10 @@
   async function start() {
     if (running) return;
     clearError();
+    lastScanStartedAt = 0;
+    scanRateEma = 0;
+    els.effectiveRate.textContent = '—';
+    els.ocrTime.textContent = '—';
     els.start.disabled = true;
     setStatus('Kamera startet …', 'busy');
 
@@ -484,7 +568,7 @@
 
       running = true;
       els.stop.disabled = false;
-      els.target.disabled = true;
+      els.targets.disabled = true;
       await requestWakeLock();
       setStatus('OCR wird geladen …', 'busy');
 
@@ -498,8 +582,7 @@
       }
 
       setStatus('Scan aktiv', 'active');
-      scanOnce();
-      scanTimer = setInterval(scanOnce, Number(els.interval.value));
+      scheduleNextScan(0);
     } catch (err) {
       console.error(err);
       const name = err && err.name ? err.name : '';
@@ -519,8 +602,10 @@
   async function stop() {
     running = false;
     busy = false;
-    if (scanTimer) clearInterval(scanTimer);
+    if (scanTimer) clearTimeout(scanTimer);
     scanTimer = null;
+    if (videoFrameRequest !== null && els.video.cancelVideoFrameCallback) { try { els.video.cancelVideoFrameCallback(videoFrameRequest); } catch (_) {} }
+    videoFrameRequest = null;
     clearTimeout(zoomApplyTimer);
     clearTimeout(focusRingTimer);
     if (stream) stream.getTracks().forEach((t) => t.stop());
@@ -544,7 +629,7 @@
     els.focusStatus.textContent = 'Nach dem Start ins Kamerabild tippen.';
     els.start.disabled = false;
     els.stop.disabled = true;
-    els.target.disabled = false;
+    els.targets.disabled = false;
     await releaseWakeLock();
     setStatus('Bereit', 'idle');
   }
@@ -552,14 +637,15 @@
   els.start.addEventListener('click', start);
   els.stop.addEventListener('click', stop);
   els.testAlarm.addEventListener('click', async () => {
-    els.hitPlate.textContent = prettyPlate(els.target.value);
+    els.hitPlate.textContent = prettyPlate(getTargets()[0]?.raw || 'TEST');
     els.overlay.hidden = false;
     await soundAlarm();
     setTimeout(() => { els.overlay.hidden = true; }, 1800);
   });
   els.clearLog.addEventListener('click', () => { localStorage.removeItem('plateHitLog'); renderLog(); });
+  els.targets.addEventListener('input', updateTargetCount);
   els.interval.addEventListener('change', () => {
-    if (running) { clearInterval(scanTimer); scanTimer = setInterval(scanOnce, Number(els.interval.value)); }
+    if (running && !busy) scheduleNextScan(0);
   });
   els.roiMode.addEventListener('change', updateRoiFrame);
   els.wake.addEventListener('change', async () => { if (running) els.wake.checked ? requestWakeLock() : releaseWakeLock(); });
@@ -588,6 +674,9 @@
   });
   window.addEventListener('pagehide', stop);
 
+  const savedTargets = localStorage.getItem('plateTargets');
+  if (savedTargets && savedTargets.trim()) els.targets.value = savedTargets;
+  updateTargetCount();
   updateRoiFrame();
   renderLog();
 })();
