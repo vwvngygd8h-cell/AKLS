@@ -40,3 +40,29 @@
 .focus-controls{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .focus-controls small{display:block;margin-top:3px}
 .range{width:100%}
+
+/* V9.4 – echte Kennzeichen-KI */
+.plate-box{
+  position:absolute;
+  pointer-events:none;
+  border-radius:5px;
+  box-sizing:border-box;
+  transition:left .10s linear,top .10s linear,width .10s linear,height .10s linear,border-color .12s ease;
+  z-index:3;
+}
+.plate-box.yellow{border:3px solid #ffd400;box-shadow:0 0 12px rgba(255,212,0,.45)}
+.plate-box.green{border:3px solid #23d46b;box-shadow:0 0 14px rgba(35,212,107,.45)}
+.plate-box.red{border:4px solid #ff3131;box-shadow:0 0 20px rgba(255,49,49,.65);z-index:4}
+.plate-label{
+  position:absolute;
+  left:-2px;
+  bottom:calc(100% + 4px);
+  white-space:nowrap;
+  padding:3px 6px;
+  border-radius:5px;
+  background:rgba(0,0,0,.78);
+  color:#fff;
+  font-size:12px;
+  font-weight:800;
+  line-height:1.15;
+}
