@@ -17,18 +17,20 @@ const els={
   autoFocus:$('autoFocusBtn'),focusStatus:$('focusStatus'),
   manualFocusGroup:$('manualFocusGroup'),focus:$('focusSlider'),focusValue:$('focusValue'),
   detectorThreshold:$('detectorThreshold'),detectorThresholdValue:$('detectorThresholdValue'),
-  detectorMetric:$('detectorMetric')
+  detectorMetric:$('detectorMetric'),ocrRawMetric:$('ocrRawMetric')
 };
 
-const APP_VERSION='9.5.1';
+const APP_VERSION='9.6.0';
 const MODEL_URL='https://raw.githubusercontent.com/MikeLud/Blue-Iris-Custom-AI-Models/main/Custom-YOLOv8-11/plates.onnx';
 const MODEL_SIZE=640;
-let DETECT_CONF=.58;
+let DETECT_CONF=.54;
 const NMS_IOU=.70;
-const DETECT_EVERY_MS=20;
-const TRACK_TTL=1150;
+const DETECT_EVERY_MS=5;
+const TRACK_TTL=900;
 const YELLOW_CONFIRMATIONS=2;
-const INSTANT_YELLOW_CONF=.82;
+const INSTANT_YELLOW_CONF=.78;
+const MOTION_YELLOW_CONF=.58;
+const MOTION_TEXTURE_MIN=68;
 const MAX_VISIBLE_PLATES=2;
 const GREEN_CONFIRMATIONS=2;
 const RED_CONFIRMATIONS=2;
@@ -36,6 +38,7 @@ const LOG_KEY='akls-v94-log';
 const TARGET_KEY='plateTargetsV94';
 
 let stream=null,cameraTrack=null,ocrWorker=null,detectorSession=null;
+const textureCanvas=document.createElement('canvas');
 let running=false,detectBusy=false,ocrBusy=false,detectTimer=null,wakeLock=null,audioCtx=null;
 let scans=0,hits=0,lastHitAt=0,pendingReload=false,nextTrackId=1,tracks=[],capabilities={};
 
@@ -184,7 +187,7 @@ function parseYolo(output,prep){
 
     // Very strong detections can pass directly. Moderate detections need
     // plausible character texture to prevent footwell/dashboard false positives.
-    if(conf<INSTANT_YELLOW_CONF && texture<55)continue;
+    if(conf<INSTANT_YELLOW_CONF && texture<58)continue;
     dets.push(det);
   }
   dets.sort((a,b)=>b.conf-a.conf);
@@ -216,7 +219,7 @@ function plateTextureScore(box){
   const w=clamp(Math.floor(box.w),1,vw-x),h=clamp(Math.floor(box.h),1,vh-y);
   if(w<18||h<7)return 0;
 
-  const c=els.canvas,ctx=c.getContext('2d',{willReadFrequently:true});
+  const c=textureCanvas,ctx=c.getContext('2d',{willReadFrequently:true});
   const W=160,H=48;
   c.width=W;c.height=H;
   ctx.filter='grayscale(1) contrast(1.3)';
@@ -299,7 +302,11 @@ function renderTracks(){
   for(const t of tracks){
     if(t.redUntil>now)t.state='red';
     else if(t.greenUntil>now)t.state='green';
-    else if((t.confirmations||0)>=YELLOW_CONFIRMATIONS || t.conf>=INSTANT_YELLOW_CONF)t.state='yellow';
+    else if(
+      (t.confirmations||0)>=YELLOW_CONFIRMATIONS ||
+      t.conf>=INSTANT_YELLOW_CONF ||
+      (t.conf>=MOTION_YELLOW_CONF && (t.texture||0)>=MOTION_TEXTURE_MIN)
+    )t.state='yellow';
     else t.state='pending';
 
     if(t.state==='pending')continue;
@@ -415,17 +422,42 @@ function extractOcrCandidates(data){
 }
 
 async function recognizeTrack(t){
-  // Fast first pass. Only do the binary pass if the first result is weak.
-  const r1=await ocrWorker.recognize(plateCrop(t,'contrast'),{}, {text:true,blocks:true});
-  let best=extractOcrCandidates(r1.data);
+  const candidates=[];
 
-  if(!best || best.conf<45 || germanPlatePlausibility(best.text)<20){
-    const r2=await ocrWorker.recognize(plateCrop(t,'binary'),{}, {text:true,blocks:true});
-    const alt=extractOcrCandidates(r2.data);
-    if(alt && (!best || alt.conf+germanPlatePlausibility(alt.text) > best.conf+germanPlatePlausibility(best.text))){
-      best=alt;
+  async function runPass(variant,psm){
+    try{
+      await ocrWorker.setParameters({tessedit_pageseg_mode:String(psm)});
+      const result=await ocrWorker.recognize(plateCrop(t,variant),{}, {text:true,blocks:true});
+      const read=extractOcrCandidates(result.data);
+      if(read)candidates.push(read);
+    }catch(e){
+      console.warn('ocr pass',variant,psm,e);
     }
   }
+
+  // Fast standard plate line.
+  await runPass('contrast',7);
+
+  // If weak, treat the crop as one word/plate.
+  let best=candidates.sort((a,b)=>
+    (b.conf+germanPlatePlausibility(b.text))-(a.conf+germanPlatePlausibility(a.text))
+  )[0]||null;
+
+  if(!best || best.conf<55 || germanPlatePlausibility(best.text)<20){
+    await runPass('contrast',8);
+    best=candidates.sort((a,b)=>
+      (b.conf+germanPlatePlausibility(b.text))-(a.conf+germanPlatePlausibility(a.text))
+    )[0]||null;
+  }
+
+  // Last fallback for difficult contrast / reflections.
+  if(!best || best.conf<45 || germanPlatePlausibility(best.text)<18){
+    await runPass('binary',7);
+    best=candidates.sort((a,b)=>
+      (b.conf+germanPlatePlausibility(b.text))-(a.conf+germanPlatePlausibility(a.text))
+    )[0]||null;
+  }
+
   return best;
 }
 
@@ -473,7 +505,7 @@ function targetVote(t){
 async function scheduleOcr(){
   if(!running||ocrBusy)return;
   const now=Date.now();
-  const live=tracks.filter(t=>now-t.lastSeen<800 && ((t.confirmations||0)>=YELLOW_CONFIRMATIONS || t.conf>=INSTANT_YELLOW_CONF)).sort((a,b)=>(now-b.lastOcrAt)-(now-a.lastOcrAt)||b.conf-a.conf);
+  const live=tracks.filter(t=>now-t.lastSeen<800 && ((t.confirmations||0)>=YELLOW_CONFIRMATIONS || t.conf>=INSTANT_YELLOW_CONF || (t.conf>=MOTION_YELLOW_CONF && (t.texture||0)>=MOTION_TEXTURE_MIN))).sort((a,b)=>(now-b.lastOcrAt)-(now-a.lastOcrAt)||b.conf-a.conf);
   const t=live[0];if(!t)return;
   ocrBusy=true;t.lastOcrAt=now;
   const started=performance.now();
@@ -481,6 +513,7 @@ async function scheduleOcr(){
     const read=await recognizeTrack(t);
     scans++;els.scanCount.textContent=String(scans);els.ocrTime.textContent=`${Math.round(performance.now()-started)} ms`;
     const text=read?.text||'',conf=read?.conf||0;
+    if(els.ocrRawMetric)els.ocrRawMetric.textContent=text?`${text} · ${Math.round(conf)} %`:'—';
     if(text.length>=4&&text.length<=10&&conf>=Math.max(12,Number(els.confidence.value)-30)&&germanPlatePlausibility(text)>=15){
       t.history.push({text,conf,time:Date.now()});
       const c=consensus(t);
@@ -540,7 +573,7 @@ async function start(){
     await ensureAudio();
     await Promise.all([initDetector(),initOcr()]);
     setStatus('Kamera startet …','busy');
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:60,max:60}},audio:false});
     cameraTrack=stream.getVideoTracks()[0];els.video.srcObject=stream;
     if(els.video.readyState<1||!els.video.videoWidth)await new Promise((resolve,reject)=>{const to=setTimeout(()=>reject(new Error('Kamerabild wurde nicht bereitgestellt.')),6000);els.video.addEventListener('loadedmetadata',()=>{clearTimeout(to);resolve()},{once:true})});
     els.video.muted=true;els.video.playsInline=true;els.video.setAttribute('playsinline','');els.video.setAttribute('webkit-playsinline','');await els.video.play();
@@ -575,7 +608,7 @@ document.addEventListener('visibilitychange',async()=>{if(document.visibilitySta
 async function initServiceWorker(){
   if(!('serviceWorker'in navigator))return;let reloading=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading)return;if(running){pendingReload=true;return}reloading=true;location.reload()});
-  try{const reg=await navigator.serviceWorker.register('./sw.js?v=951',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
+  try{const reg=await navigator.serviceWorker.register('./sw.js?v=96',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
 }
 const savedThreshold=Number(localStorage.getItem('aklsDetectorThreshold'));
 if(Number.isFinite(savedThreshold)&&savedThreshold>=.35&&savedThreshold<=.85)DETECT_CONF=savedThreshold;

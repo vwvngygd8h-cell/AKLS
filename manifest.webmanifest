@@ -1,20 +1,20 @@
 {
   "name": "AKLS Kennzeichen-Wächter",
   "short_name": "AKLS",
-  "description": "AKLS V9.5.1: schnelle YOLO-Erkennung mit zusätzlicher Kennzeichen-Texturprüfung",
-  "start_url": "./?v=951",
+  "description": "AKLS V9.6: getrennte OCR-/Detektorpuffer, schnelle Gegenverkehrserkennung und robuste Multi-Pass-OCR",
+  "start_url": "./?v=96",
   "scope": "./",
   "display": "standalone",
   "background_color": "#090b0e",
   "theme_color": "#090b0e",
   "icons": [
     {
-      "src": "apple-touch-icon.png?v=951",
+      "src": "apple-touch-icon.png?v=96",
       "sizes": "180x180",
       "type": "image/png"
     },
     {
-      "src": "icon-512.png?v=951",
+      "src": "icon-512.png?v=96",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
