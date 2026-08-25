@@ -6,14 +6,14 @@
     video: $('video'), canvas: $('captureCanvas'), vehicleCanvas: $('vehicleCanvas'), roiPreview: $('roiPreview'), stage: $('cameraStage'), start: $('startBtn'), stop: $('stopBtn'),
     targets: $('targetPlates'), targetCount: $('targetCount'), activeTargets: $('activeTargets'), closestTarget: $('closestTarget'), ocrTime: $('ocrTime'), effectiveRate: $('effectiveRate'), tolerant: $('tolerantMode'), wake: $('wakeLockToggle'),
     interval: $('scanInterval'), roiMode: $('roiMode'), vehicleThreshold: $('vehicleThreshold'), status: $('statusPill'),
-    placeholder: $('placeholder'), scanFrame: $('scanFrame'),
+    placeholder: $('placeholder'), scanFrame: $('scanFrame'), vehicleBoxes: $('vehicleBoxes'),
     lastOcr: $('lastOcr'), similarity: $('similarity'), scanCount: $('scanCount'), hitCount: $('hitCount'), hintCount: $('hintCount'), vehicleScore: $('vehicleScore'),
     hitLog: $('hitLog'), clearLog: $('clearLogBtn'), testAlarm: $('testAlarmBtn'), errorBox: $('errorBox'), focusRing: $('focusRing'),
     zoom: $('zoomSlider'), zoomValue: $('zoomValue'), zoomSupport: $('zoomSupport'), autoFocus: $('autoFocusBtn'), focusStatus: $('focusStatus'), manualFocusGroup: $('manualFocusGroup'),
     focus: $('focusSlider'), focusValue: $('focusValue'), cameraHud: $('cameraHud'), cameraResolution: $('cameraResolution'), cameraZoomMode: $('cameraZoomMode'),
     alertBanner: $('alertBanner'), alertType: $('alertType'), alertText: $('alertText'),
     photoTargetSelect: $('photoTargetSelect'), vehiclePhotoInput: $('vehiclePhotoInput'), vehicleAssistToggle: $('vehicleAssistToggle'), vehicleRefsGrid: $('vehicleRefsGrid'), vehicleRefsSummary: $('vehicleRefsSummary'),
-    clearTargetRefsBtn: $('clearTargetRefsBtn'), clearAllRefsBtn: $('clearAllRefsBtn')
+    clearTargetRefsBtn: $('clearTargetRefsBtn'), clearAllRefsBtn: $('clearAllRefsBtn'), vehicleAiStatus: $('vehicleAiStatus'), vehicleAiMetric: $('vehicleAiMetric')
   };
 
   const DB_NAME = 'kennzeichen-waechter-v5';
@@ -46,6 +46,16 @@
   let alertTimer = null;
   let vehicleRefs = [];
   let processingPhotoUpload = false;
+  let mobilenetModel = null;
+  let detectorModel = null;
+  let vehicleAiPromise = null;
+  let vehicleAiBusy = false;
+  let vehicleAiTimer = null;
+  let lastOcrEvidence = null;
+  let photoEvidence = new Map();
+  const VEHICLE_CLASSES = new Set(['car', 'truck', 'bus', 'motorcycle']);
+  const AI_EMBEDDING_VERSION = 'mobilenet-v2-a050-v1';
+  const VEHICLE_AI_INTERVAL = 900;
 
   const normalize = (s) => (s || '')
     .toUpperCase()
@@ -461,57 +471,77 @@
     return c;
   }
 
-  function getVehicleSampleCanvas() {
-    const view = getVisibleSourceRect();
-    if (!view) return null;
-    const x = view.x + view.w * 0.16;
-    const y = view.y + view.h * 0.18;
-    const w = view.w * 0.68;
-    const h = view.h * 0.52;
-    const c = els.vehicleCanvas;
-    c.width = 192; c.height = 108;
-    const ctx = c.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(els.video, x, y, w, h, 0, 0, c.width, c.height);
-    return c;
+  function setAiStatus(text, kind = '') {
+    els.vehicleAiStatus.textContent = text;
+    els.vehicleAiStatus.className = `ai-status ${kind}`.trim();
+    els.vehicleAiMetric.textContent = text;
   }
 
-  function buildFeatureFromCanvas(canvas) {
-    const work = document.createElement('canvas');
-    work.width = 24; work.height = 14;
-    const ctx = work.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(canvas, 0, 0, work.width, work.height);
-    const data = ctx.getImageData(0, 0, work.width, work.height).data;
-    const vec = [];
-    let sum = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
-      vec.push(gray);
-      sum += gray;
-    }
-    const mean = sum / vec.length;
+  async function ensureVehicleAi() {
+    if (mobilenetModel && detectorModel) return;
+    if (vehicleAiPromise) return vehicleAiPromise;
+    vehicleAiPromise = (async () => {
+      if (!window.tf || !window.mobilenet || !window.cocoSsd) {
+        throw new Error('KI-Bibliotheken konnten nicht geladen werden. Internetverbindung prüfen.');
+      }
+      setAiStatus('KI lädt …', 'loading');
+      try {
+        if (tf.getBackend() !== 'webgl') {
+          try { await tf.setBackend('webgl'); } catch (_) {}
+        }
+        await tf.ready();
+        const [mobile, detector] = await Promise.all([
+          mobilenet.load({ version: 2, alpha: 0.50 }),
+          cocoSsd.load({ base: 'lite_mobilenet_v2' })
+        ]);
+        mobilenetModel = mobile;
+        detectorModel = detector;
+        setAiStatus(`Bereit · ${tf.getBackend()}`, 'ready');
+        await ensureReferenceEmbeddings();
+      } catch (err) {
+        console.error('vehicle ai init failed', err);
+        setAiStatus('KI konnte nicht geladen werden', 'error');
+        vehicleAiPromise = null;
+        throw err;
+      }
+    })();
+    return vehicleAiPromise;
+  }
+
+  function normalizeEmbedding(values) {
+    const arr = Array.from(values || []);
     let norm = 0;
-    for (let i = 0; i < vec.length; i++) {
-      vec[i] -= mean;
-      norm += vec[i] * vec[i];
-    }
+    for (const v of arr) norm += v * v;
     norm = Math.sqrt(norm) || 1;
-    for (let i = 0; i < vec.length; i++) vec[i] /= norm;
-    return vec;
+    return arr.map((v) => v / norm);
   }
 
-  function similarityFromFeatures(a, b) {
+  async function getEmbedding(canvasOrImage) {
+    if (!mobilenetModel) await ensureVehicleAi();
+    const tensor = mobilenetModel.infer(canvasOrImage, true);
+    try {
+      const values = await tensor.data();
+      return normalizeEmbedding(values);
+    } finally {
+      tensor.dispose();
+    }
+  }
+
+  function similarityFromEmbeddings(a, b) {
     if (!a || !b || a.length !== b.length) return 0;
     let dot = 0;
     for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-    const scaled = Math.round(clamp((dot + 1) * 50, 0, 100));
-    return scaled;
+    return Math.round(clamp(dot, 0, 1) * 100);
   }
 
   function canvasToThumb(canvas) {
     const thumb = document.createElement('canvas');
     thumb.width = 160; thumb.height = 120;
-    thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height);
-    return thumb.toDataURL('image/jpeg', 0.82);
+    const ctx = thumb.getContext('2d');
+    ctx.fillStyle = '#050607';
+    ctx.fillRect(0, 0, thumb.width, thumb.height);
+    drawImageCover(ctx, canvas, thumb.width, thumb.height);
+    return thumb.toDataURL('image/jpeg', 0.84);
   }
 
   function drawImageCover(ctx, img, dw, dh) {
@@ -540,6 +570,70 @@
     });
   }
 
+  function loadImageFromDataUrl(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  function predictionArea(pred) {
+    return pred.bbox[2] * pred.bbox[3];
+  }
+
+  async function cropDetectedVehicle(source, predictions = null) {
+    const preds = predictions || await detectorModel.detect(source, 8, 0.42);
+    const vehicles = preds
+      .filter((p) => VEHICLE_CLASSES.has(p.class) && p.score >= 0.42)
+      .sort((a, b) => (predictionArea(b) * b.score) - (predictionArea(a) * a.score));
+    const pred = vehicles[0] || null;
+    const c = document.createElement('canvas');
+    c.width = 320; c.height = 224;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#050607';
+    ctx.fillRect(0, 0, c.width, c.height);
+    if (!pred) {
+      drawImageCover(ctx, source, c.width, c.height);
+      return { canvas: c, prediction: null };
+    }
+    const sw = source.videoWidth || source.naturalWidth || source.width;
+    const sh = source.videoHeight || source.naturalHeight || source.height;
+    let [x, y, w, h] = pred.bbox;
+    const padX = w * 0.09;
+    const padY = h * 0.09;
+    x = clamp(x - padX, 0, sw - 1);
+    y = clamp(y - padY, 0, sh - 1);
+    w = clamp(w + padX * 2, 1, sw - x);
+    h = clamp(h + padY * 2, 1, sh - y);
+    const temp = document.createElement('canvas');
+    temp.width = Math.max(2, Math.round(w));
+    temp.height = Math.max(2, Math.round(h));
+    temp.getContext('2d').drawImage(source, x, y, w, h, 0, 0, temp.width, temp.height);
+    drawImageCover(ctx, temp, c.width, c.height);
+    return { canvas: c, prediction: pred };
+  }
+
+  async function ensureReferenceEmbeddings() {
+    if (!mobilenetModel) return;
+    let changed = false;
+    for (const ref of vehicleRefs) {
+      if (ref.embeddingVersion === AI_EMBEDDING_VERSION && Array.isArray(ref.embedding) && ref.embedding.length) continue;
+      try {
+        const img = await loadImageFromDataUrl(ref.thumb);
+        ref.embedding = await getEmbedding(img);
+        ref.embeddingVersion = AI_EMBEDDING_VERSION;
+        delete ref.feature;
+        await dbPutRef(ref);
+        changed = true;
+      } catch (err) {
+        console.warn('reference migration failed', err);
+      }
+    }
+    if (changed) vehicleRefs = await dbGetAllRefs();
+  }
+
   async function addVehiclePhotos(files) {
     const targetNormalized = els.photoTargetSelect.value;
     const targets = getTargets();
@@ -550,26 +644,37 @@
     }
     processingPhotoUpload = true;
     clearError();
+    setAiStatus('KI lädt für Referenzfotos …', 'loading');
     try {
+      await ensureVehicleAi();
+      let index = 0;
       for (const file of files) {
+        index += 1;
+        setAiStatus(`Referenz ${index}/${files.length} wird analysiert …`, 'loading');
         const img = await loadImageFromFile(file);
-        const c = document.createElement('canvas');
-        c.width = 192; c.height = 144;
-        const ctx = c.getContext('2d', { willReadFrequently: true });
-        drawImageCover(ctx, img, c.width, c.height);
-        const feature = buildFeatureFromCanvas(c);
+        const detected = await cropDetectedVehicle(img);
+        const embedding = await getEmbedding(detected.canvas);
         const ref = {
           id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           targetNormalized: target.normalized,
           targetRaw: target.raw,
           fileName: file.name,
-          thumb: canvasToThumb(c),
-          feature
+          thumb: canvasToThumb(detected.canvas),
+          embedding,
+          embeddingVersion: AI_EMBEDDING_VERSION,
+          detectedClass: detected.prediction?.class || null,
+          detectedScore: detected.prediction?.score || null
         };
         await dbPutRef(ref);
       }
       vehicleRefs = await dbGetAllRefs();
+      setAiStatus(`Bereit · ${tf.getBackend()}`, 'ready');
       renderVehicleRefs();
+      if (running && els.vehicleAssistToggle.checked) scheduleVehicleAi(100);
+    } catch (err) {
+      console.error(err);
+      showError('Die Referenzfotos konnten nicht vollständig analysiert werden. ' + (err.message || String(err)));
+      setAiStatus('Fotoanalyse fehlgeschlagen', 'error');
     } finally {
       processingPhotoUpload = false;
       els.vehiclePhotoInput.value = '';
@@ -587,7 +692,8 @@
       els.vehicleRefsGrid.innerHTML = '<div class="empty-log">Noch keine Referenzfotos.</div>';
       return;
     }
-    els.vehicleRefsSummary.textContent = `${visibleRefs.length} Referenzfoto(s) gespeichert.`;
+    const aiCount = visibleRefs.filter((r) => r.embeddingVersion === AI_EMBEDDING_VERSION && Array.isArray(r.embedding)).length;
+    els.vehicleRefsSummary.textContent = `${visibleRefs.length} Referenzfoto(s) · ${aiCount} KI-bereit.`;
     els.vehicleRefsGrid.innerHTML = visibleRefs.map((ref) => `
       <div class="ref-card">
         <img src="${ref.thumb}" alt="${escapeHtml(ref.targetRaw)}" />
@@ -598,18 +704,141 @@
       </div>`).join('');
   }
 
-  function getBestVehicleMatch(currentFeature, ocrBest) {
-    if (!els.vehicleAssistToggle.checked || !currentFeature || !vehicleRefs.length) return null;
-    const filtered = ocrBest
-      ? vehicleRefs.filter((r) => r.targetNormalized === ocrBest.target.normalized)
-      : vehicleRefs;
-    const pool = filtered.length ? filtered : vehicleRefs;
+  function captureAiFrame() {
+    const view = getVisibleSourceRect();
+    if (!view) return null;
+    const maxW = 640;
+    const scale = Math.min(1, maxW / view.w);
+    const c = els.vehicleCanvas;
+    c.width = Math.max(320, Math.round(view.w * scale));
+    c.height = Math.max(180, Math.round(view.h * scale));
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(els.video, view.x, view.y, view.w, view.h, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  function cropPrediction(source, pred) {
+    const [bx, by, bw, bh] = pred.bbox;
+    const padX = bw * 0.08;
+    const padY = bh * 0.08;
+    const x = clamp(bx - padX, 0, source.width - 1);
+    const y = clamp(by - padY, 0, source.height - 1);
+    const w = clamp(bw + padX * 2, 1, source.width - x);
+    const h = clamp(bh + padY * 2, 1, source.height - y);
+    const out = document.createElement('canvas');
+    out.width = 320; out.height = 224;
+    const ctx = out.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#050607';
+    ctx.fillRect(0, 0, out.width, out.height);
+    const temp = document.createElement('canvas');
+    temp.width = Math.max(2, Math.round(w));
+    temp.height = Math.max(2, Math.round(h));
+    temp.getContext('2d').drawImage(source, x, y, w, h, 0, 0, temp.width, temp.height);
+    drawImageCover(ctx, temp, out.width, out.height);
+    return out;
+  }
+
+  function bestReferenceForEmbedding(embedding) {
     let best = null;
-    for (const ref of pool) {
-      const score = similarityFromFeatures(currentFeature, ref.feature);
+    for (const ref of vehicleRefs) {
+      if (!Array.isArray(ref.embedding) || ref.embeddingVersion !== AI_EMBEDDING_VERSION) continue;
+      const score = similarityFromEmbeddings(embedding, ref.embedding);
       if (!best || score > best.score) best = { score, ref };
     }
     return best;
+  }
+
+  function renderVehicleBoxes(predictions, bestIndex = -1) {
+    if (!predictions.length) {
+      els.vehicleBoxes.innerHTML = '';
+      return;
+    }
+    const sourceW = els.vehicleCanvas.width || 1;
+    const sourceH = els.vehicleCanvas.height || 1;
+    els.vehicleBoxes.innerHTML = predictions.map((pred, index) => {
+      const [x, y, w, h] = pred.bbox;
+      const left = clamp(x / sourceW * 100, 0, 100);
+      const top = clamp(y / sourceH * 100, 0, 100);
+      const width = clamp(w / sourceW * 100, 0, 100 - left);
+      const height = clamp(h / sourceH * 100, 0, 100 - top);
+      const label = pred.match ? `${pred.class} · ${pred.match.score}% ${prettyPlate(pred.match.ref.targetRaw)}` : `${pred.class} ${Math.round(pred.score * 100)}%`;
+      return `<div class="vehicle-box ${index === bestIndex ? 'best' : ''}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%"><span>${escapeHtml(label)}</span></div>`;
+    }).join('');
+  }
+
+  function scheduleVehicleAi(delay = VEHICLE_AI_INTERVAL) {
+    clearTimeout(vehicleAiTimer);
+    if (!running || !els.vehicleAssistToggle.checked || !vehicleRefs.length) return;
+    vehicleAiTimer = setTimeout(runVehicleAiOnce, delay);
+  }
+
+  async function runVehicleAiOnce() {
+    if (!running || !els.vehicleAssistToggle.checked || !vehicleRefs.length || vehicleAiBusy) {
+      scheduleVehicleAi();
+      return;
+    }
+    vehicleAiBusy = true;
+    try {
+      await ensureVehicleAi();
+      const frame = captureAiFrame();
+      if (!frame) return;
+      const detections = (await detectorModel.detect(frame, 8, 0.42))
+        .filter((p) => VEHICLE_CLASSES.has(p.class) && p.score >= 0.42)
+        .sort((a, b) => (predictionArea(b) * b.score) - (predictionArea(a) * a.score))
+        .slice(0, 3);
+
+      let bestLive = null;
+      let bestIndex = -1;
+      for (let i = 0; i < detections.length; i++) {
+        const crop = cropPrediction(frame, detections[i]);
+        const embedding = await getEmbedding(crop);
+        const match = bestReferenceForEmbedding(embedding);
+        detections[i].match = match;
+        if (match && (!bestLive || match.score > bestLive.score)) {
+          bestLive = { ...match, prediction: detections[i], index: i };
+          bestIndex = i;
+        }
+      }
+
+      renderVehicleBoxes(detections, bestIndex);
+      els.vehicleAiMetric.textContent = detections.length ? `${detections.length} Fahrzeug(e)` : 'kein Fahrzeug';
+      els.vehicleScore.textContent = bestLive ? `${bestLive.score} % · ${prettyPlate(bestLive.ref.targetRaw)}` : '—';
+      if (bestLive) await evaluatePhotoEvidence(bestLive);
+    } catch (err) {
+      console.warn('vehicle ai iteration failed', err);
+      setAiStatus('KI-Scan pausiert', 'error');
+    } finally {
+      vehicleAiBusy = false;
+      if (running) scheduleVehicleAi();
+    }
+  }
+
+  async function evaluatePhotoEvidence(bestLive) {
+    const threshold = Number(els.vehicleThreshold.value || 78);
+    if (bestLive.score < threshold) return;
+    const target = bestLive.ref.targetNormalized;
+    const now = Date.now();
+    const previous = photoEvidence.get(target);
+    const count = previous && now - previous.time < 2600 ? previous.count + 1 : 1;
+    photoEvidence.set(target, { count, time: now, score: bestLive.score });
+
+    const ocrSupport = lastOcrEvidence &&
+      now - lastOcrEvidence.time < 3200 &&
+      lastOcrEvidence.targetNormalized === target &&
+      lastOcrEvidence.similarity >= 45;
+
+    const stablePhoto = count >= 2 && bestLive.score >= threshold;
+    const strongPhoto = count >= 2 && bestLive.score >= threshold + 6;
+    if (!(ocrSupport && stablePhoto) && !strongPhoto) return;
+
+    if (now - (lastHintAt.get(target) || 0) <= 6500) return;
+    lastHintAt.set(target, now);
+    photoEvidence.set(target, { count: 0, time: now, score: bestLive.score });
+    await registerEvent('hint', bestLive.ref.targetRaw, {
+      recognized: ocrSupport ? lastOcrEvidence.value : '',
+      score: bestLive.score,
+      message: ocrSupport ? 'KI-Foto + OCR stimmen überein' : 'KI-Foto wiederholt sehr ähnlich'
+    });
   }
 
   async function setZoom(value) {
@@ -723,7 +952,6 @@
     lastScanStartedAt = started;
     try {
       const frame = cropFrame();
-      const vehicleCanvas = getVehicleSampleCanvas();
       if (!frame) return;
 
       const result = await worker.recognize(frame);
@@ -742,7 +970,7 @@
         els.lastOcr.textContent = '—';
         els.closestTarget.textContent = 'Keine Ziele';
         els.similarity.textContent = '—';
-        els.vehicleScore.textContent = '—';
+        lastOcrEvidence = null;
         return;
       }
 
@@ -750,13 +978,14 @@
       els.lastOcr.textContent = best?.value || '—';
       els.closestTarget.textContent = best ? prettyPlate(best.target.raw) : '—';
       els.similarity.textContent = best ? `${best.similarity} %` : '—';
-
-      let bestVehicle = null;
-      if (vehicleCanvas && vehicleRefs.length) {
-        const feature = buildFeatureFromCanvas(vehicleCanvas);
-        bestVehicle = getBestVehicleMatch(feature, best);
-      }
-      els.vehicleScore.textContent = bestVehicle ? `${bestVehicle.score} % · ${prettyPlate(bestVehicle.ref.targetRaw)}` : '—';
+      lastOcrEvidence = best ? {
+        targetNormalized: best.target.normalized,
+        targetRaw: best.target.raw,
+        similarity: best.similarity,
+        value: best.value || '',
+        distance: best.distance,
+        time: Date.now()
+      } : null;
 
       const allowed = els.tolerant.checked ? 1 : 0;
       if (best && best.value && best.distance <= allowed) {
@@ -764,23 +993,10 @@
         const now = Date.now();
         if (now - (lastHitAt.get(key) || 0) > 5000) {
           lastHitAt.set(key, now);
-          await registerEvent('hit', best.target.raw, { recognized: best.value, score: bestVehicle?.score ?? null });
-        }
-      } else if (bestVehicle && bestVehicle.score >= Number(els.vehicleThreshold.value || 88)) {
-        const targetNorm = bestVehicle.ref.targetNormalized;
-        const ocrSupport = best && best.target.normalized === targetNorm && best.similarity >= 55;
-        const noOcrButStrong = (!best || best.similarity < 55) && bestVehicle.score >= Math.min(96, Number(els.vehicleThreshold.value || 88) + 6);
-        if (ocrSupport || noOcrButStrong) {
-          const key = targetNorm;
-          const now = Date.now();
-          if (now - (lastHintAt.get(key) || 0) > 6000) {
-            lastHintAt.set(key, now);
-            await registerEvent('hint', bestVehicle.ref.targetRaw, {
-              recognized: best?.value || '',
-              score: bestVehicle.score,
-              message: ocrSupport ? 'Foto + OCR passen zusammen' : 'Starke Bildähnlichkeit'
-            });
-          }
+          const livePhoto = vehicleRefs.length && els.vehicleAssistToggle.checked
+            ? photoEvidence.get(key)?.score ?? null
+            : null;
+          await registerEvent('hit', best.target.raw, { recognized: best.value, score: livePhoto });
         }
       }
       if (running) setStatus('Scan aktiv', 'active');
@@ -887,6 +1103,9 @@
 
       setStatus('Scan aktiv', 'active');
       scheduleNextScan(0);
+      if (els.vehicleAssistToggle.checked && vehicleRefs.length) {
+        ensureVehicleAi().then(() => scheduleVehicleAi(100)).catch((err) => console.warn(err));
+      }
     } catch (err) {
       console.error(err);
       const name = err && err.name ? err.name : '';
@@ -913,6 +1132,11 @@
     clearTimeout(zoomApplyTimer);
     clearTimeout(focusRingTimer);
     clearTimeout(alertTimer);
+    clearTimeout(vehicleAiTimer);
+    vehicleAiTimer = null;
+    vehicleAiBusy = false;
+    photoEvidence.clear();
+    lastOcrEvidence = null;
     if (stream) stream.getTracks().forEach((t) => t.stop());
     stream = null;
     track = null;
@@ -924,6 +1148,7 @@
     els.placeholder.style.display = '';
     els.cameraHud.hidden = true;
     els.alertBanner.hidden = true;
+    els.vehicleBoxes.innerHTML = '';
     els.focusRing.hidden = true;
     els.zoom.disabled = true;
     els.zoom.value = '1';
@@ -955,6 +1180,17 @@
   els.targets.addEventListener('input', updateTargetCount);
   els.interval.addEventListener('change', () => { if (running && !busy) scheduleNextScan(0); });
   els.roiMode.addEventListener('change', updateRoiFrame);
+  els.vehicleAssistToggle.addEventListener('change', () => {
+    if (!running) return;
+    if (els.vehicleAssistToggle.checked && vehicleRefs.length) {
+      ensureVehicleAi().then(() => scheduleVehicleAi(100)).catch((err) => console.warn(err));
+    } else {
+      clearTimeout(vehicleAiTimer);
+      els.vehicleBoxes.innerHTML = '';
+      els.vehicleScore.textContent = '—';
+      els.vehicleAiMetric.textContent = 'pausiert';
+    }
+  });
   els.wake.addEventListener('change', async () => { if (running) els.wake.checked ? requestWakeLock() : releaseWakeLock(); });
   els.zoom.addEventListener('input', () => {
     els.zoomValue.textContent = `${fmt(Number(els.zoom.value))}×`;
@@ -996,9 +1232,14 @@
   window.addEventListener('pagehide', stop);
 
   async function init() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('service worker', err));
+    }
     const savedTargets = localStorage.getItem('plateTargets');
     if (savedTargets && savedTargets.trim()) els.targets.value = savedTargets;
     vehicleRefs = await dbGetAllRefs().catch(() => []);
+    if (vehicleRefs.length && els.vehicleAssistToggle.checked) setAiStatus('KI wird beim Scanstart geladen.');
+    else setAiStatus('KI-Fahrzeugerkennung wird bei Bedarf geladen.');
     updateTargetCount();
     updateRoiFrame();
     renderLog();

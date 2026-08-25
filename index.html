@@ -10,9 +10,12 @@
   <title>Kennzeichen-Wächter</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="styles.css?v=6" />
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script defer src="app.js?v=5"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+  <script defer src="app.js?v=6"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -36,6 +39,7 @@
           <div class="scan-label">OCR-BEREICH</div>
         </div>
 
+        <div id="vehicleBoxes" class="vehicle-boxes" aria-hidden="true"></div>
         <div id="focusRing" class="focus-ring" hidden aria-hidden="true"></div>
 
         <div id="cameraHud" class="camera-hud" hidden>
@@ -151,9 +155,9 @@
           <label>
             Foto-Hinweisschwelle
             <select id="vehicleThreshold">
-              <option value="84">niedriger</option>
-              <option value="88" selected>mittel</option>
-              <option value="92">hoch</option>
+              <option value="72">empfindlich</option>
+              <option value="78" selected>ausgewogen</option>
+              <option value="84">streng</option>
             </select>
           </label>
         </div>
@@ -182,7 +186,8 @@
         </span>
       </label>
 
-      <div class="photo-help">Die Fotos sind eine zusätzliche Hilfsstufe. Sie erhöhen die Chance auf einen Hinweis, wenn das Kennzeichen im Gegenverkehr nur teilweise lesbar ist. Sie ersetzen die Kennzeichenprüfung nicht.</div>
+      <div class="photo-help">V6 nutzt echte KI-Bildmerkmale und erkennt zuerst Fahrzeuge im Kamerabild. Ein Foto-Match löst niemals einen harten Treffer aus: Für einen Hinweis muss die Zuordnung wiederholt stabil sein oder zusätzlich von der OCR gestützt werden.</div>
+      <div id="vehicleAiStatus" class="ai-status">KI-Fahrzeugerkennung wird bei Bedarf geladen.</div>
 
       <div id="vehicleRefsSummary" class="refs-summary">Noch keine Referenzfotos.</div>
       <div id="vehicleRefsGrid" class="refs-grid"><div class="empty-log">Noch keine Referenzfotos.</div></div>
@@ -199,6 +204,7 @@
       <div class="metric"><span>OCR-Zeit</span><strong id="ocrTime">—</strong></div>
       <div class="metric"><span>Effektive Rate</span><strong id="effectiveRate">—</strong></div>
       <div class="metric"><span>Foto-Score</span><strong id="vehicleScore">—</strong></div>
+      <div class="metric"><span>Fahrzeug-KI</span><strong id="vehicleAiMetric">—</strong></div>
       <div class="metric"><span>Scans</span><strong id="scanCount">0</strong></div>
       <div class="metric"><span>Treffer</span><strong id="hitCount">0</strong></div>
       <div class="metric"><span>Hinweise</span><strong id="hintCount">0</strong></div>

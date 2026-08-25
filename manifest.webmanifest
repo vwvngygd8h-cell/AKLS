@@ -1,7 +1,7 @@
 {
   "name": "Kennzeichen-Wächter",
   "short_name": "Kennzeichen",
-  "description": "Lokale Live-Kennzeichenerkennung mit Trefferalarm und Foto-Hinweisen.",
+  "description": "Lokale Live-Kennzeichenerkennung mit Trefferalarm und KI-Foto-Hinweisen.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#080a0d",
