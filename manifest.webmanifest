@@ -1,20 +1,20 @@
 {
   "name": "AKLS Kennzeichen-Wächter",
   "short_name": "AKLS",
-  "description": "AKLS V9.3.1: OCR-basierte Kennzeichenboxen mit repariertem Kamera-, Zoom- und Fokusstart",
-  "start_url": "./?v=931",
+  "description": "AKLS V9.3.2: empfindlichere OCR-basierte Kennzeichen-Ersterkennung mit engen Boxen",
+  "start_url": "./?v=932",
   "scope": "./",
   "display": "standalone",
   "background_color": "#090b0e",
   "theme_color": "#090b0e",
   "icons": [
     {
-      "src": "apple-touch-icon.png?v=931",
+      "src": "apple-touch-icon.png?v=932",
       "sizes": "180x180",
       "type": "image/png"
     },
     {
-      "src": "icon-512.png?v=931",
+      "src": "icon-512.png?v=932",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

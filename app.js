@@ -18,7 +18,7 @@ const els = {
   manualFocusGroup:$('manualFocusGroup'), focus:$('focusSlider'), focusValue:$('focusValue')
 };
 
-const APP_VERSION='9.3.1';
+const APP_VERSION='9.3.2';
 const LOG_KEY='akls-v93-log';
 const TARGET_KEY='plateTargetsV93';
 const TRACK_TTL=2200;
@@ -86,11 +86,12 @@ function bestTargetMatch(value){
 
 function germanPlatePlausibility(s){
   const n=normalize(s);
-  if(n.length<4||n.length>10)return 0;
+  if(n.length<3||n.length>10)return 0;
   let score=0;
-  if(/[A-Z]/.test(n)&&/\d/.test(n))score+=20;
-  if(/^[A-Z]{2,5}\d{1,4}[EH]?$/.test(n))score+=35;
-  if(/^[A-Z]{1,3}[A-Z]{1,2}\d{1,4}[EH]?$/.test(n))score+=15;
+  if(/[A-Z]/.test(n)&&/\d/.test(n))score+=18;
+  if(/^[A-Z]{2,5}\d{1,4}[EH]?$/.test(n))score+=32;
+  if(/^[A-Z]{1,3}[A-Z]{1,2}\d{1,4}[EH]?$/.test(n))score+=18;
+  if(/^[A-Z]{1,5}\d{1,4}[A-Z]?$/.test(n))score+=10;
   return score;
 }
 
@@ -266,14 +267,14 @@ function extractCandidates(data,crop){
     const confidence=Number(w.confidence)||0;
     const b=w.bbox;
     if(!text||!b)return;
-    if(text.length<4||text.length>10)return;
-    if(confidence<Math.max(28,Number(els.confidence.value)-15))return;
-    if(germanPlatePlausibility(text)<35)return;
+    if(text.length<3||text.length>10)return;
+    if(confidence<Math.max(18,Number(els.confidence.value)-25))return;
+    if(germanPlatePlausibility(text)<18)return;
 
     const bw=b.x1-b.x0,bh=b.y1-b.y0;
     if(bw<=0||bh<=0)return;
     const ratio=bw/bh;
-    if(ratio<1.7||ratio>8.5)return;
+    if(ratio<1.25||ratio>9.5)return;
 
     const padX=Math.max(4,bw*.08),padY=Math.max(3,bh*.18);
     const box={
@@ -291,6 +292,45 @@ function extractCandidates(data,crop){
       for(const line of par.lines||[])
         for(const word of line.words||[])pushWord(word);
 
+
+  // V9.3.2: combine adjacent OCR words from one line.
+  // Tesseract often splits German plates, e.g. "NB" + "BC" + "721".
+  for(const block of data.blocks||[]){
+    for(const par of block.paragraphs||[]){
+      for(const line of par.lines||[]){
+        const lineWords=(line.words||[]).filter(w=>w?.bbox && normalize(w.text));
+        if(lineWords.length<2) continue;
+        for(let start=0; start<lineWords.length; start++){
+          let text='', x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity, conf=0,count=0;
+          for(let end=start; end<Math.min(lineWords.length,start+4); end++){
+            const w=lineWords[end], n=normalize(w.text);
+            if(!n) continue;
+            text += n;
+            x0=Math.min(x0,w.bbox.x0); y0=Math.min(y0,w.bbox.y0);
+            x1=Math.max(x1,w.bbox.x1); y1=Math.max(y1,w.bbox.y1);
+            conf += Number(w.confidence)||0; count++;
+            if(text.length<3 || text.length>10) continue;
+            const avg=conf/Math.max(1,count);
+            if(avg<Math.max(18,Number(els.confidence.value)-25)) continue;
+            if(germanPlatePlausibility(text)<18) continue;
+            const bw=x1-x0,bh=y1-y0,ratio=bw/Math.max(1,bh);
+            if(ratio<1.25||ratio>9.5) continue;
+            const padX=Math.max(4,bw*.06),padY=Math.max(3,bh*.14);
+            words.push({
+              text,confidence:avg,
+              box:{
+                x:crop.source.x+(x0-padX)*crop.scaleX,
+                y:crop.source.y+(y0-padY)*crop.scaleY,
+                w:(bw+2*padX)*crop.scaleX,
+                h:(bh+2*padY)*crop.scaleY
+              }
+            });
+          }
+        }
+      }
+    }
+  }
+
   // Also use line boxes when Tesseract groups the whole plate as a line.
   for(const block of data.blocks||[]){
     for(const par of block.paragraphs||[]){
@@ -298,10 +338,10 @@ function extractCandidates(data,crop){
         const text=normalize(line.text);
         const confidence=Number(line.confidence)||0;
         const b=line.bbox;
-        if(!b||text.length<4||text.length>10||confidence<Math.max(28,Number(els.confidence.value)-15))continue;
-        if(germanPlatePlausibility(text)<35)continue;
+        if(!b||text.length<3||text.length>10||confidence<Math.max(18,Number(els.confidence.value)-25))continue;
+        if(germanPlatePlausibility(text)<18)continue;
         const bw=b.x1-b.x0,bh=b.y1-b.y0,ratio=bw/Math.max(1,bh);
-        if(ratio<1.7||ratio>8.5)continue;
+        if(ratio<1.25||ratio>9.5)continue;
         const padX=Math.max(4,bw*.05),padY=Math.max(3,bh*.12);
         words.push({
           text,confidence,
@@ -322,7 +362,7 @@ function extractCandidates(data,crop){
   for(const w of words){
     if(kept.some(k=>boxIou(k.box,w.box)>.45))continue;
     kept.push(w);
-    if(kept.length>=3)break;
+    if(kept.length>=4)break;
   }
   return kept;
 }
@@ -595,7 +635,7 @@ async function initServiceWorker(){
     if(reloading)return;if(running){pendingReload=true;return;}reloading=true;location.reload();
   });
   try{
-    const reg=await navigator.serviceWorker.register('./sw.js?v=931',{updateViaCache:'none'});
+    const reg=await navigator.serviceWorker.register('./sw.js?v=932',{updateViaCache:'none'});
     setTimeout(()=>reg.update().catch(()=>{}),1500);
     setInterval(()=>reg.update().catch(()=>{}),120000);
   }catch(e){console.warn('service worker',e)}
