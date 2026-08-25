@@ -1,5 +1,5 @@
-const CACHE='akls-v92-20260825';
-const LOCAL=['./','./index.html','./styles.css?v=92','./app.js?v=92','./manifest.webmanifest?v=92','./icon-512.png?v=92','./apple-touch-icon.png?v=92'];
+const CACHE='akls-v93-20260825';
+const LOCAL=['./','./index.html','./styles.css?v=93','./app.js?v=93','./manifest.webmanifest?v=93','./icon-512.png?v=93','./apple-touch-icon.png?v=93'];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const c=await caches.open(CACHE);await c.addAll(LOCAL);await self.skipWaiting();})())});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)));await self.clients.claim();})())});
 self.addEventListener('fetch',event=>{if(event.request.method!=='GET')return;const u=new URL(event.request.url);if(event.request.mode==='navigate'){event.respondWith((async()=>{try{const r=await fetch(event.request,{cache:'no-store'});const c=await caches.open(CACHE);c.put('./index.html',r.clone());return r}catch(_){return await caches.match('./index.html')||await caches.match('./')}})());return}if(u.origin===self.location.origin){event.respondWith((async()=>{try{const r=await fetch(event.request,{cache:'no-store'});const c=await caches.open(CACHE);c.put(event.request,r.clone());return r}catch(_){return await caches.match(event.request)||Response.error()}})())}});

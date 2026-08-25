@@ -24,3 +24,19 @@
 /* V9.2 false-positive reduction */
 .plate-box.pending{display:none!important}
 .plate-box.yellow{box-shadow:0 0 0 1px rgba(0,0,0,.45),0 0 10px rgba(255,196,0,.28)}
+
+/* V9.3: OCR-bbox instead of large heuristic rectangles */
+.plate-box{
+  border-radius:6px;
+  min-width:30px;
+  min-height:14px;
+  pointer-events:none;
+}
+.plate-box.yellow{border-width:2px!important}
+.plate-box.green,.plate-box.red{border-width:3px!important}
+.camera-controls{display:grid;gap:12px;margin-top:12px}
+.camera-control-row{display:grid;gap:8px}
+.camera-control-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.focus-controls{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.focus-controls small{display:block;margin-top:3px}
+.range{width:100%}

@@ -1,20 +1,20 @@
 {
   "name": "AKLS Kennzeichen-Wächter",
   "short_name": "AKLS",
-  "description": "AKLS V9.2: strengere lokale Kennzeichenerkennung mit weniger Fehlmarkierungen",
-  "start_url": "./?v=92",
+  "description": "AKLS V9.3: präzise OCR-basierte Kennzeichenboxen mit Zoom und Fokus",
+  "start_url": "./?v=93",
   "scope": "./",
   "display": "standalone",
   "background_color": "#090b0e",
   "theme_color": "#090b0e",
   "icons": [
     {
-      "src": "apple-touch-icon.png?v=92",
+      "src": "apple-touch-icon.png?v=93",
       "sizes": "180x180",
       "type": "image/png"
     },
     {
-      "src": "icon-512.png?v=92",
+      "src": "icon-512.png?v=93",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
