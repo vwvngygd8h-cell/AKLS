@@ -15,14 +15,16 @@ const els = {
   setupView:$('setupView'), scanView:$('scanView'), logView:$('logView')
 };
 
-const APP_VERSION = '9.1.0';
+const APP_VERSION = '9.2.0';
 const LOG_KEY = 'akls-v9-log';
 const TARGET_KEY = 'plateTargetsV9';
-const DETECT_INTERVAL = 120;
-const TRACK_TTL = 1100;
+const DETECT_INTERVAL = 150;
+const TRACK_TTL = 750;
 const HISTORY_TTL = 2600;
 const GREEN_CONFIRMATIONS = 2;
 const RED_CONFIRMATIONS = 2;
+const YELLOW_CONFIRMATIONS = 2;
+const MAX_LIVE_TRACKS = 2;
 
 let stream=null, worker=null, running=false, busy=false, scanTimer=null, detectorTimer=null;
 let wakeLock=null, audioCtx=null, scans=0, hits=0, lastHitAt=0, pendingReload=false;
@@ -193,6 +195,7 @@ function renderTracks(){
   });
 
   for(const t of tracks){
+    if((t.seenCount||0) < YELLOW_CONFIRMATIONS && t.state!=='green' && t.state!=='red') continue;
     const p=sourceToStage(t.box);
     if(!p) continue;
     let div=els.overlay.querySelector(`.plate-box[data-track-id="${t.id}"]`);
@@ -204,7 +207,8 @@ function renderTracks(){
     }
     if(t.redUntil>now) t.state='red';
     else if(t.greenUntil>now) t.state='green';
-    else t.state='yellow';
+    else if((t.seenCount||0) >= YELLOW_CONFIRMATIONS) t.state='yellow';
+    else t.state='pending';
 
     div.className=`plate-box ${t.state}`;
     div.style.left=`${clamp(p.left,0,els.stage.clientWidth-6)}px`;
@@ -254,8 +258,8 @@ function detectorCandidates(){
   const sum=(arr,x,y,w,h)=>arr[(y+h)*(W+1)+(x+w)]-arr[y*(W+1)+(x+w)]-arr[(y+h)*(W+1)+x]+arr[y*(W+1)+x];
 
   const raw=[];
-  const widths=[34,42,50,60,72,84,96];
-  const ratios=[2.6,3.0,3.4,3.8,4.3,4.8,5.2];
+  const widths=[42,50,60,72,84];
+  const ratios=[3.2,3.6,4.0,4.4,4.8];
 
   for(const ww of widths){
     for(const ar of ratios){
@@ -268,10 +272,19 @@ function detectorCandidates(){
           const edge=sum(edgeInt,x,y,ww,hh)/area;
           const dark=sum(darkInt,x,y,ww,hh)/area;
           const centerBias=1-Math.abs((x+ww/2)-W/2)/(W/2);
-          const brightFit=1-Math.min(1,Math.abs(mean-145)/110);
-          const charMix=1-Math.abs(dark-.34);
-          const score=edge*.70 + brightFit*13 + charMix*10 + centerBias*8;
-          if(mean>58 && mean<235 && edge>22 && dark>.08 && dark<.78 && score>33){
+          const brightFit=1-Math.min(1,Math.abs(mean-155)/80);
+          const darkFit=1-Math.min(1,Math.abs(dark-.30)/.30);
+
+          // Kennzeichen sind typischerweise relativ hell, horizontal,
+          // mit vielen dunklen Zeichenkanten auf heller Fläche.
+          const score=edge*.85 + brightFit*18 + darkFit*14 + centerBias*5;
+
+          if(
+            mean>95 && mean<225 &&
+            edge>30 &&
+            dark>.12 && dark<.58 &&
+            score>47
+          ){
             raw.push({x,y,w:ww,h:hh,score});
           }
         }
@@ -283,9 +296,9 @@ function detectorCandidates(){
   const kept=[];
   for(const candidate of raw){
     const normalized={x:candidate.x/W,y:candidate.y/H,w:candidate.w/W,h:candidate.h/H};
-    if(kept.some(k=>iou(normalized,k.normalized)>.34)) continue;
+    if(kept.some(k=>iou(normalized,k.normalized)>.26)) continue;
     kept.push({...candidate,normalized});
-    if(kept.length>=4) break;
+    if(kept.length>=2) break;
   }
 
   return kept.map(k=>{
@@ -316,6 +329,7 @@ function updateTracks(detections){
       t.box=smoothBox(t.box,d);
       t.lastSeen=now;
       t.detectorScore=d.score;
+      t.seenCount=(t.seenCount||1)+1;
       unmatched.delete(bestI);
     }
   }
@@ -324,10 +338,13 @@ function updateTracks(detections){
     const d=detections[i];
     tracks.push({
       id:nextTrackId++, box:{...d}, lastSeen:now, detectorScore:d.score,
-      state:'yellow', label:'', history:[], lastOcrAt:0, greenUntil:0, redUntil:0
+      state:'pending', label:'', history:[], lastOcrAt:0, greenUntil:0, redUntil:0,
+      seenCount:1
     });
   }
 
+  tracks.sort((a,b)=>(b.seenCount||0)-(a.seenCount||0) || b.detectorScore-a.detectorScore);
+  if(tracks.length>MAX_LIVE_TRACKS) tracks=tracks.slice(0,MAX_LIVE_TRACKS);
   renderTracks();
 }
 
@@ -339,7 +356,7 @@ function detectionLoop(){
 
 function chooseTrack(){
   const now=Date.now();
-  const live=tracks.filter(t=>now-t.lastSeen<650);
+  const live=tracks.filter(t=>now-t.lastSeen<550 && (t.seenCount||0)>=YELLOW_CONFIRMATIONS);
   if(!live.length) return null;
   live.sort((a,b)=>{
     const overdueA=now-a.lastOcrAt;
@@ -729,7 +746,7 @@ async function initServiceWorker(){
     reloading=true; location.reload();
   });
   try{
-    const reg=await navigator.serviceWorker.register('./sw.js?v=91',{updateViaCache:'none'});
+    const reg=await navigator.serviceWorker.register('./sw.js?v=92',{updateViaCache:'none'});
     setTimeout(()=>reg.update().catch(()=>{}),1500);
     setInterval(()=>reg.update().catch(()=>{}),120000);
   }catch(e){console.warn('service worker',e)}

@@ -20,3 +20,7 @@
 .camera-placeholder[hidden],
 .alert-banner[hidden]{display:none !important}
 .camera-stage.camera-live .camera-placeholder{display:none !important}
+
+/* V9.2 false-positive reduction */
+.plate-box.pending{display:none!important}
+.plate-box.yellow{box-shadow:0 0 0 1px rgba(0,0,0,.45),0 0 10px rgba(255,196,0,.28)}
