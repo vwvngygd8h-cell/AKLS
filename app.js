@@ -18,7 +18,7 @@ const els = {
   manualFocusGroup:$('manualFocusGroup'), focus:$('focusSlider'), focusValue:$('focusValue')
 };
 
-const APP_VERSION='9.3.0';
+const APP_VERSION='9.3.1';
 const LOG_KEY='akls-v93-log';
 const TARGET_KEY='plateTargetsV93';
 const TRACK_TTL=2200;
@@ -576,9 +576,9 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':
 els.targets.addEventListener('input',updateTargetCount);
 els.start.addEventListener('click',start);
 els.stop.addEventListener('click',()=>stop(true));
-els.zoom.addEventListener('input',()=>setZoom(els.zoom.value));
-els.autoFocus.addEventListener('click',setAutoFocus);
-els.focus.addEventListener('input',()=>setManualFocus(els.focus.value));
+els.zoom?.addEventListener('input',()=>setZoom(els.zoom.value));
+els.autoFocus?.addEventListener('click',setAutoFocus);
+els.focus?.addEventListener('input',()=>setManualFocus(els.focus.value));
 els.testAlarm.addEventListener('click',async()=>{
   const t=targets()[0];if(!t)return;
   showView('scanView');showBanner(t.raw);setStatus('TREFFER','hit');await alarm();
@@ -595,7 +595,7 @@ async function initServiceWorker(){
     if(reloading)return;if(running){pendingReload=true;return;}reloading=true;location.reload();
   });
   try{
-    const reg=await navigator.serviceWorker.register('./sw.js?v=93',{updateViaCache:'none'});
+    const reg=await navigator.serviceWorker.register('./sw.js?v=931',{updateViaCache:'none'});
     setTimeout(()=>reg.update().catch(()=>{}),1500);
     setInterval(()=>reg.update().catch(()=>{}),120000);
   }catch(e){console.warn('service worker',e)}

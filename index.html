@@ -7,18 +7,18 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="AKLS">
-  <title>AKLS V9.3</title>
-  <link rel="manifest" href="manifest.webmanifest?v=93">
-  <link rel="icon" href="icon-512.png?v=93" type="image/png">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=93">
-  <link rel="stylesheet" href="styles.css?v=93">
+  <title>AKLS V9.3.1</title>
+  <link rel="manifest" href="manifest.webmanifest?v=931">
+  <link rel="icon" href="icon-512.png?v=931" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=931">
+  <link rel="stylesheet" href="styles.css?v=931">
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script defer src="app.js?v=93"></script>
+  <script defer src="app.js?v=931"></script>
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
-      <div class="brand"><img src="apple-touch-icon.png?v=93" alt="AKLS"><div><div class="eyebrow">AKLS · V9.3</div><h1>Kennzeichen-Wächter</h1></div></div>
+      <div class="brand"><img src="apple-touch-icon.png?v=931" alt="AKLS"><div><div class="eyebrow">AKLS · V9.3.1</div><h1>Kennzeichen-Wächter</h1></div></div>
       <div id="statusPill" class="status-pill idle">Bereit</div>
     </header>
 
@@ -30,7 +30,7 @@
 
     <section id="setupView" class="view active-view">
       <section class="card hero-card">
-        <div><div class="section-title">AKLS V9.3</div><h2>Ziel festlegen und Scan starten</h2><p>Gelb = Kandidat erkannt · Grün = über mehrere Frames bestätigt · Rot = Ziel mehrfach bestätigt.</p></div>
+        <div><div class="section-title">AKLS V9.3.1</div><h2>Ziel festlegen und Scan starten</h2><p>Gelb = Kandidat erkannt · Grün = über mehrere Frames bestätigt · Rot = Ziel mehrfach bestätigt.</p></div>
         <button id="startBtn" class="button primary large" type="button">Scan starten</button>
       </section>
 
@@ -76,6 +76,33 @@
             <div id="placeholder" class="camera-placeholder"><div class="camera-icon">◉</div><div>Scan noch nicht gestartet</div></div>
           </div>
           <div class="legend"><span><i class="dot yellow"></i>Kennzeichen erkannt</span><span><i class="dot green"></i>Korrekt gelesen</span><span><i class="dot red"></i>Zieltreffer</span></div>
+
+          <div class="camera-controls scan-controls">
+            <div class="camera-control-row zoom-block">
+              <div class="camera-control-head">
+                <label for="zoomSlider">Zoom</label>
+                <output id="zoomValue" for="zoomSlider">1,0×</output>
+              </div>
+              <input id="zoomSlider" class="range" type="range" min="1" max="4" step="0.1" value="1" disabled />
+              <small id="zoomSupport">Wird nach Kamerastart geprüft.</small>
+            </div>
+
+            <div class="focus-controls scan-focus">
+              <div>
+                <strong>Fokus</strong>
+                <small id="focusStatus">Wird nach Kamerastart geprüft.</small>
+              </div>
+              <button id="autoFocusBtn" class="button compact secondary" type="button" disabled>Auto</button>
+            </div>
+
+            <div id="manualFocusGroup" class="camera-control-row manual-focus" hidden>
+              <div class="camera-control-head">
+                <label for="focusSlider">Manueller Fokus</label>
+                <output id="focusValue" for="focusSlider">—</output>
+              </div>
+              <input id="focusSlider" class="range" type="range" min="0" max="1" step="0.01" value="0.5" />
+            </div>
+          </div>
         </section>
 
         <section class="telemetry-card">
@@ -94,7 +121,7 @@
       <section class="card"><div class="section-title">Ereignisprotokoll</div><div id="hitLog" class="hit-log"><div class="empty-log">Noch keine Ereignisse.</div></div><button id="clearLogBtn" class="text-button" type="button">Protokoll löschen</button></section>
     </section>
 
-    <footer>AKLS V9.3 · automatische Aktualisierung · Verarbeitung lokal im Browser</footer>
+    <footer>AKLS V9.3.1 · automatische Aktualisierung · Verarbeitung lokal im Browser</footer>
   </main>
 </body>
 </html>
