@@ -66,3 +66,6 @@
   font-weight:800;
   line-height:1.15;
 }
+
+/* V9.4.2 diagnostic controls */
+#detectorThresholdValue{font-weight:800}

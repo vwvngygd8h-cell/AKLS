@@ -15,17 +15,19 @@ const els={
   setupView:$('setupView'),scanView:$('scanView'),logView:$('logView'),
   zoom:$('zoomSlider'),zoomValue:$('zoomValue'),zoomSupport:$('zoomSupport'),
   autoFocus:$('autoFocusBtn'),focusStatus:$('focusStatus'),
-  manualFocusGroup:$('manualFocusGroup'),focus:$('focusSlider'),focusValue:$('focusValue')
+  manualFocusGroup:$('manualFocusGroup'),focus:$('focusSlider'),focusValue:$('focusValue'),
+  detectorThreshold:$('detectorThreshold'),detectorThresholdValue:$('detectorThresholdValue'),
+  detectorMetric:$('detectorMetric')
 };
 
-const APP_VERSION='9.4.1';
+const APP_VERSION='9.4.2';
 const MODEL_URL='https://raw.githubusercontent.com/MikeLud/Blue-Iris-Custom-AI-Models/main/Custom-YOLOv8-11/plates.onnx';
 const MODEL_SIZE=640;
-const DETECT_CONF=.80;
+let DETECT_CONF=.55;
 const NMS_IOU=.70;
 const DETECT_EVERY_MS=280;
-const TRACK_TTL=850;
-const YELLOW_CONFIRMATIONS=3;
+const TRACK_TTL=950;
+const YELLOW_CONFIRMATIONS=2;
 const MAX_VISIBLE_PLATES=2;
 const GREEN_CONFIRMATIONS=2;
 const RED_CONFIRMATIONS=2;
@@ -139,6 +141,7 @@ function letterboxToTensor(crop){
 function sigmoid(x){return 1/(1+Math.exp(-x))}
 function parseYolo(output,prep){
   const dims=output.dims,data=output.data;
+  let rawBest=0;
   let count,attrs,transpose=false;
   if(dims.length===3&&dims[1]<=10){attrs=dims[1];count=dims[2];transpose=true}
   else if(dims.length===3){count=dims[1];attrs=dims[2]}
@@ -151,6 +154,7 @@ function parseYolo(output,prep){
     const cx=read(i,0),cy=read(i,1),w=read(i,2),h=read(i,3);
     let conf=read(i,4);
     if(conf<0||conf>1)conf=sigmoid(conf);
+    if(conf>rawBest)rawBest=conf;
     if(conf<DETECT_CONF)continue;
     const x1=(cx-w/2-prep.padX)/prep.scale;
     const y1=(cy-h/2-prep.padY)/prep.scale;
@@ -162,9 +166,9 @@ function parseYolo(output,prep){
 
     // Standard-Kennzeichen sind horizontal und nehmen im normalen
     // Frontscheibenbild nur einen kleinen Teil der ROI ein.
-    if(ratio<1.8||ratio>7.5)continue;
-    if(areaRatio<0.00012||areaRatio>0.10)continue;
-    if(bw>prep.crop.w*.72||bh>prep.crop.h*.30)continue;
+    if(ratio<1.3||ratio>8.5)continue;
+    if(areaRatio<0.00005||areaRatio>0.18)continue;
+    if(bw>prep.crop.w*.85||bh>prep.crop.h*.40)continue;
 
     dets.push({
       x:clamp(prep.crop.x+x1,prep.crop.x,prep.crop.x+prep.crop.w-1),
@@ -180,6 +184,9 @@ function parseYolo(output,prep){
     if(keep.some(k=>iou(k,d)>NMS_IOU))continue;
     keep.push(d);
     if(keep.length>=MAX_VISIBLE_PLATES)break;
+  }
+  if(els.detectorMetric){
+    els.detectorMetric.textContent=`${Math.round(rawBest*100)} %`;
   }
   return keep;
 }
@@ -412,6 +419,11 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':
 
 els.targets.addEventListener('input',updateTargetCount);
 els.start.addEventListener('click',start);els.stop.addEventListener('click',()=>stop(true));
+els.detectorThreshold?.addEventListener('input',()=>{
+  DETECT_CONF=Number(els.detectorThreshold.value);
+  if(els.detectorThresholdValue)els.detectorThresholdValue.textContent=`${Math.round(DETECT_CONF*100)} %`;
+  localStorage.setItem('aklsDetectorThreshold',String(DETECT_CONF));
+});
 els.zoom?.addEventListener('input',()=>setZoom(els.zoom.value));els.autoFocus?.addEventListener('click',setAutoFocus);els.focus?.addEventListener('input',()=>setManualFocus(els.focus.value));
 els.testAlarm.addEventListener('click',async()=>{const t=targets()[0];if(!t)return;showView('scanView');showBanner(t.raw);setStatus('TREFFER','hit');await alarm();setTimeout(()=>{if(!running){setStatus('Bereit','idle');showView('setupView')}},2200)});
 els.clearLog.addEventListener('click',()=>{localStorage.removeItem(LOG_KEY);renderLog()});
@@ -421,7 +433,13 @@ document.addEventListener('visibilitychange',async()=>{if(document.visibilitySta
 async function initServiceWorker(){
   if(!('serviceWorker'in navigator))return;let reloading=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading)return;if(running){pendingReload=true;return}reloading=true;location.reload()});
-  try{const reg=await navigator.serviceWorker.register('./sw.js?v=941',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
+  try{const reg=await navigator.serviceWorker.register('./sw.js?v=942',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
+}
+const savedThreshold=Number(localStorage.getItem('aklsDetectorThreshold'));
+if(Number.isFinite(savedThreshold)&&savedThreshold>=.35&&savedThreshold<=.85)DETECT_CONF=savedThreshold;
+if(els.detectorThreshold){
+  els.detectorThreshold.value=String(DETECT_CONF);
+  if(els.detectorThresholdValue)els.detectorThresholdValue.textContent=`${Math.round(DETECT_CONF*100)} %`;
 }
 const saved=localStorage.getItem(TARGET_KEY)||localStorage.getItem('plateTargetsV93')||localStorage.getItem('plateTargetsV9')||localStorage.getItem('plateTargetsV8')||localStorage.getItem('plateTargets');
 if(saved)els.targets.value=saved;
