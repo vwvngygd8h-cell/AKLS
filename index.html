@@ -10,9 +10,9 @@
   <title>Kennzeichen-Wächter</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script defer src="app.js?v=4"></script>
+  <script defer src="app.js?v=5"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -28,6 +28,7 @@
       <div id="cameraStage" class="camera-stage" aria-label="Live-Kamerabild">
         <video id="video" playsinline muted></video>
         <canvas id="captureCanvas" hidden></canvas>
+        <canvas id="vehicleCanvas" hidden></canvas>
 
         <div id="scanFrame" class="scan-frame" aria-hidden="true">
           <div class="corner tl"></div><div class="corner tr"></div>
@@ -42,9 +43,9 @@
           <span id="cameraZoomMode">Zoom —</span>
         </div>
 
-        <div id="hitOverlay" class="hit-overlay" hidden>
-          <div class="hit-kicker">TREFFER</div>
-          <div id="hitPlate" class="hit-plate">NB-BC 721</div>
+        <div id="alertBanner" class="alert-banner" hidden>
+          <div id="alertType" class="alert-type">TREFFER</div>
+          <div id="alertText" class="alert-text">NB-BC 721</div>
         </div>
 
         <div id="placeholder" class="camera-placeholder">
@@ -54,13 +55,21 @@
       </div>
 
       <div class="camera-controls">
-        <div class="camera-control-row">
-          <div class="camera-control-head">
-            <label for="zoomSlider">Zoom</label>
-            <output id="zoomValue" for="zoomSlider">1,0×</output>
+        <div class="camera-grid">
+          <div class="camera-control-row">
+            <div class="camera-control-head">
+              <label for="zoomSlider">Zoom</label>
+              <output id="zoomValue" for="zoomSlider">1,0×</output>
+            </div>
+            <input id="zoomSlider" class="range" type="range" min="1" max="4" step="0.1" value="1" disabled />
+            <small id="zoomSupport">Wird nach Kamerastart geprüft.</small>
           </div>
-          <input id="zoomSlider" class="range" type="range" min="1" max="4" step="0.1" value="1" disabled />
-          <small id="zoomSupport">Wird nach Kamerastart geprüft.</small>
+
+          <div class="preview-card">
+            <div class="preview-title">Scan-Vorschau</div>
+            <canvas id="roiPreview" class="preview-canvas" width="320" height="120"></canvas>
+            <small>So sieht der tatsächlich ausgewertete OCR-Ausschnitt aus.</small>
+          </div>
         </div>
 
         <div class="focus-controls">
@@ -79,7 +88,7 @@
           <input id="focusSlider" class="range" type="range" min="0" max="1" step="0.01" value="0.5" />
         </div>
 
-        <div class="camera-note">Der grüne Rahmen zeigt exakt den Bereich, der auf das Kennzeichen geprüft wird. Tippe ins Livebild, um dort zu fokussieren.</div>
+        <div class="camera-note">Der grüne Rahmen zeigt exakt den Bereich, der für die Kennzeichen-OCR geprüft wird. Es gibt keinen flächigen roten Treffer-Hintergrund mehr, damit du Fokus und Bildausschnitt jederzeit sehen kannst.</div>
       </div>
     </section>
 
@@ -96,7 +105,7 @@
           <input id="tolerantMode" type="checkbox" />
           <span class="switch"></span>
           <span>
-            <strong>Tolerante Erkennung</strong>
+            <strong>Tolerante Kennzeichen-Erkennung</strong>
             <small>Erlaubt 1 OCR-Zeichenfehler</small>
           </span>
         </label>
@@ -139,8 +148,48 @@
               <option value="full">Ganzes Bild</option>
             </select>
           </label>
+          <label>
+            Foto-Hinweisschwelle
+            <select id="vehicleThreshold">
+              <option value="84">niedriger</option>
+              <option value="88" selected>mittel</option>
+              <option value="92">hoch</option>
+            </select>
+          </label>
         </div>
       </details>
+    </section>
+
+    <section class="photo-card">
+      <div class="section-title">Fahrzeugfotos als Zusatzhinweis</div>
+      <div class="photo-controls">
+        <label>
+          Fotos gehören zu
+          <select id="photoTargetSelect"></select>
+        </label>
+        <label class="file-picker">
+          <span>Fotos hinzufügen</span>
+          <input id="vehiclePhotoInput" type="file" accept="image/*" multiple />
+        </label>
+      </div>
+
+      <label class="switch-row compact-switch">
+        <input id="vehicleAssistToggle" type="checkbox" checked />
+        <span class="switch"></span>
+        <span>
+          <strong>Foto-Assistenz aktiv</strong>
+          <small>Zeigt einen Hinweis, wenn Fahrzeugbild + OCR zum selben Ziel passen</small>
+        </span>
+      </label>
+
+      <div class="photo-help">Die Fotos sind eine zusätzliche Hilfsstufe. Sie erhöhen die Chance auf einen Hinweis, wenn das Kennzeichen im Gegenverkehr nur teilweise lesbar ist. Sie ersetzen die Kennzeichenprüfung nicht.</div>
+
+      <div id="vehicleRefsSummary" class="refs-summary">Noch keine Referenzfotos.</div>
+      <div id="vehicleRefsGrid" class="refs-grid"><div class="empty-log">Noch keine Referenzfotos.</div></div>
+      <div class="photo-actions">
+        <button id="clearTargetRefsBtn" class="button secondary compact" type="button">Fotos für gewähltes Ziel löschen</button>
+        <button id="clearAllRefsBtn" class="button secondary compact" type="button">Alle Fotos löschen</button>
+      </div>
     </section>
 
     <section class="telemetry-card">
@@ -149,19 +198,21 @@
       <div class="metric"><span>Ähnlichkeit</span><strong id="similarity">—</strong></div>
       <div class="metric"><span>OCR-Zeit</span><strong id="ocrTime">—</strong></div>
       <div class="metric"><span>Effektive Rate</span><strong id="effectiveRate">—</strong></div>
+      <div class="metric"><span>Foto-Score</span><strong id="vehicleScore">—</strong></div>
       <div class="metric"><span>Scans</span><strong id="scanCount">0</strong></div>
       <div class="metric"><span>Treffer</span><strong id="hitCount">0</strong></div>
+      <div class="metric"><span>Hinweise</span><strong id="hintCount">0</strong></div>
       <div class="metric"><span>Ziele aktiv</span><strong id="activeTargets">1</strong></div>
     </section>
 
     <section class="log-card">
-      <div class="section-title">Trefferprotokoll</div>
-      <div id="hitLog" class="hit-log"><div class="empty-log">Noch keine Treffer.</div></div>
+      <div class="section-title">Ereignisprotokoll</div>
+      <div id="hitLog" class="hit-log"><div class="empty-log">Noch keine Treffer oder Hinweise.</div></div>
       <button id="clearLogBtn" class="text-button" type="button">Protokoll löschen</button>
     </section>
 
     <footer>
-      Kamera und OCR laufen nur, solange diese Seite geöffnet ist. Für die Kamera ist HTTPS erforderlich.
+      Kamera, OCR und Fotovergleich laufen nur, solange diese Seite geöffnet ist. Für die Kamera ist HTTPS erforderlich.
     </footer>
   </main>
 </body>

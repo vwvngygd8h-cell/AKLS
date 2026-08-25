@@ -3,19 +3,24 @@
 
   const $ = (id) => document.getElementById(id);
   const els = {
-    video: $('video'), canvas: $('captureCanvas'), stage: $('cameraStage'), start: $('startBtn'), stop: $('stopBtn'),
+    video: $('video'), canvas: $('captureCanvas'), vehicleCanvas: $('vehicleCanvas'), roiPreview: $('roiPreview'), stage: $('cameraStage'), start: $('startBtn'), stop: $('stopBtn'),
     targets: $('targetPlates'), targetCount: $('targetCount'), activeTargets: $('activeTargets'), closestTarget: $('closestTarget'), ocrTime: $('ocrTime'), effectiveRate: $('effectiveRate'), tolerant: $('tolerantMode'), wake: $('wakeLockToggle'),
-    interval: $('scanInterval'), roiMode: $('roiMode'), status: $('statusPill'),
-    placeholder: $('placeholder'), overlay: $('hitOverlay'), hitPlate: $('hitPlate'), scanFrame: $('scanFrame'),
-    lastOcr: $('lastOcr'), similarity: $('similarity'), scanCount: $('scanCount'),
-    hitCount: $('hitCount'), hitLog: $('hitLog'), clearLog: $('clearLogBtn'),
-    testAlarm: $('testAlarmBtn'), errorBox: $('errorBox'), focusRing: $('focusRing'),
-    zoom: $('zoomSlider'), zoomValue: $('zoomValue'), zoomSupport: $('zoomSupport'),
-    autoFocus: $('autoFocusBtn'), focusStatus: $('focusStatus'), manualFocusGroup: $('manualFocusGroup'),
-    focus: $('focusSlider'), focusValue: $('focusValue'), cameraHud: $('cameraHud'),
-    cameraResolution: $('cameraResolution'), cameraZoomMode: $('cameraZoomMode')
+    interval: $('scanInterval'), roiMode: $('roiMode'), vehicleThreshold: $('vehicleThreshold'), status: $('statusPill'),
+    placeholder: $('placeholder'), scanFrame: $('scanFrame'),
+    lastOcr: $('lastOcr'), similarity: $('similarity'), scanCount: $('scanCount'), hitCount: $('hitCount'), hintCount: $('hintCount'), vehicleScore: $('vehicleScore'),
+    hitLog: $('hitLog'), clearLog: $('clearLogBtn'), testAlarm: $('testAlarmBtn'), errorBox: $('errorBox'), focusRing: $('focusRing'),
+    zoom: $('zoomSlider'), zoomValue: $('zoomValue'), zoomSupport: $('zoomSupport'), autoFocus: $('autoFocusBtn'), focusStatus: $('focusStatus'), manualFocusGroup: $('manualFocusGroup'),
+    focus: $('focusSlider'), focusValue: $('focusValue'), cameraHud: $('cameraHud'), cameraResolution: $('cameraResolution'), cameraZoomMode: $('cameraZoomMode'),
+    alertBanner: $('alertBanner'), alertType: $('alertType'), alertText: $('alertText'),
+    photoTargetSelect: $('photoTargetSelect'), vehiclePhotoInput: $('vehiclePhotoInput'), vehicleAssistToggle: $('vehicleAssistToggle'), vehicleRefsGrid: $('vehicleRefsGrid'), vehicleRefsSummary: $('vehicleRefsSummary'),
+    clearTargetRefsBtn: $('clearTargetRefsBtn'), clearAllRefsBtn: $('clearAllRefsBtn')
   };
 
+  const DB_NAME = 'kennzeichen-waechter-v5';
+  const DB_VERSION = 1;
+  const REF_STORE = 'vehicleRefs';
+
+  let dbPromise = null;
   let stream = null;
   let track = null;
   let worker = null;
@@ -28,7 +33,9 @@
   let wakeLock = null;
   let scans = 0;
   let hits = 0;
+  let hints = 0;
   let lastHitAt = new Map();
+  let lastHintAt = new Map();
   let audioCtx = null;
   let capabilities = {};
   let supportedConstraints = {};
@@ -36,6 +43,9 @@
   let digitalZoom = 1;
   let zoomApplyTimer = null;
   let focusRingTimer = null;
+  let alertTimer = null;
+  let vehicleRefs = [];
+  let processingPhotoUpload = false;
 
   const normalize = (s) => (s || '')
     .toUpperCase()
@@ -48,20 +58,93 @@
     return raw || normalize(s);
   };
 
+  const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+  const fmt = (n, digits = 1) => Number(n).toLocaleString('de-DE', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+  function openDb() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(REF_STORE)) {
+          const store = db.createObjectStore(REF_STORE, { keyPath: 'id' });
+          store.createIndex('targetNormalized', 'targetNormalized', { unique: false });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return dbPromise;
+  }
+
+  async function dbGetAllRefs() {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(REF_STORE, 'readonly');
+      const req = tx.objectStore(REF_STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbPutRef(ref) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(REF_STORE, 'readwrite');
+      tx.objectStore(REF_STORE).put(ref);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function dbDeleteRef(id) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(REF_STORE, 'readwrite');
+      tx.objectStore(REF_STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function dbClearTargetRefs(targetNormalized) {
+    const refs = await dbGetAllRefs();
+    await Promise.all(refs.filter((r) => r.targetNormalized === targetNormalized).map((r) => dbDeleteRef(r.id)));
+  }
+
+  async function dbClearAllRefs() {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(REF_STORE, 'readwrite');
+      tx.objectStore(REF_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   function getTargets() {
     const seen = new Set();
-    const values = (els.targets.value || '')
+    return (els.targets.value || '')
       .split(/\n|,|;/)
       .map((v) => v.trim())
       .filter(Boolean)
-      .map((v) => ({ raw: v, normalized: normalize(v) }))
+      .map((v) => ({ raw: prettyPlate(v), normalized: normalize(v) }))
       .filter((v) => v.normalized.length >= 3)
       .filter((v) => {
         if (seen.has(v.normalized)) return false;
         seen.add(v.normalized);
         return true;
       });
-    return values;
+  }
+
+  function updatePhotoTargetOptions() {
+    const targets = getTargets();
+    const current = els.photoTargetSelect.value;
+    els.photoTargetSelect.innerHTML = targets.length
+      ? targets.map((t) => `<option value="${escapeHtml(t.normalized)}">${escapeHtml(t.raw)}</option>`).join('')
+      : '<option value="">Erst Zielkennzeichen eintragen</option>';
+    if (targets.some((t) => t.normalized === current)) els.photoTargetSelect.value = current;
   }
 
   function updateTargetCount() {
@@ -69,6 +152,8 @@
     els.targetCount.textContent = `${count} Zielkennzeichen`;
     els.activeTargets.textContent = String(count);
     localStorage.setItem('plateTargets', els.targets.value);
+    updatePhotoTargetOptions();
+    renderVehicleRefs();
   }
 
   function bestTargetMatch(raw, targets) {
@@ -86,9 +171,6 @@
     }
     return bestOverall;
   }
-
-  const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
-  const fmt = (n, digits = 1) => Number(n).toLocaleString('de-DE', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
   function levenshtein(a, b) {
     const dp = Array.from({ length: b.length + 1 }, (_, i) => i);
@@ -127,26 +209,41 @@
     els.status.className = `status-pill ${kind}`;
   }
 
+  function showBanner(kind, type, text, duration = 2200) {
+    clearTimeout(alertTimer);
+    els.alertBanner.hidden = false;
+    els.alertBanner.className = `alert-banner ${kind}`;
+    els.alertType.textContent = type;
+    els.alertText.textContent = text;
+    alertTimer = setTimeout(() => {
+      els.alertBanner.hidden = true;
+      if (running) setStatus('Scan aktiv', 'active');
+    }, duration);
+  }
+
   async function ensureAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
   }
 
-  async function soundAlarm() {
+  async function playBeeps(type = 'hit') {
     await ensureAudio();
     const now = audioCtx.currentTime;
-    [0, 0.34, 0.68].forEach((offset) => {
+    const scheme = type === 'hint'
+      ? { times: [0, 0.28], frequency: 780, length: 0.16, gain: 0.22 }
+      : { times: [0, 0.34, 0.68], frequency: 1050, length: 0.22, gain: 0.45 };
+    scheme.times.forEach((offset) => {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(1050, now + offset);
+      osc.type = type === 'hint' ? 'triangle' : 'square';
+      osc.frequency.setValueAtTime(scheme.frequency, now + offset);
       gain.gain.setValueAtTime(0.0001, now + offset);
-      gain.gain.exponentialRampToValueAtTime(0.45, now + offset + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.22);
+      gain.gain.exponentialRampToValueAtTime(scheme.gain, now + offset + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + scheme.length);
       osc.connect(gain).connect(audioCtx.destination);
-      osc.start(now + offset); osc.stop(now + offset + 0.24);
+      osc.start(now + offset); osc.stop(now + offset + scheme.length + 0.02);
     });
-    if (navigator.vibrate) navigator.vibrate([220, 100, 220, 100, 400]);
+    if (navigator.vibrate) navigator.vibrate(type === 'hint' ? [150, 80, 150] : [220, 100, 220, 100, 400]);
   }
 
   async function requestWakeLock() {
@@ -175,9 +272,7 @@
     setStatus('OCR lädt …', 'busy');
     worker = await Tesseract.createWorker('eng', 1, {
       logger: (m) => {
-        if (m.status === 'recognizing text' && typeof m.progress === 'number') {
-          setStatus(`OCR ${Math.round(m.progress * 100)} %`, 'busy');
-        }
+        if (m.status === 'recognizing text' && typeof m.progress === 'number') setStatus(`OCR ${Math.round(m.progress * 100)} %`, 'busy');
       }
     });
     await worker.setParameters({
@@ -220,7 +315,6 @@
       await applyAdvanced(values);
       els.focusStatus.textContent = 'Auto-Fokus aktiv · ins Bild tippen für Fokuspunkt.';
     } catch (err) {
-      console.warn('continuous focus not available', err);
       if (!silent) els.focusStatus.textContent = 'Kamera-Autofokus aktiv.';
     }
   }
@@ -234,7 +328,6 @@
 
     const zoomCap = capabilities.zoom;
     hardwareZoom = !!(zoomCap && Number.isFinite(zoomCap.min) && Number.isFinite(zoomCap.max) && zoomCap.max > zoomCap.min);
-
     if (hardwareZoom) {
       const min = zoomCap.min;
       const max = zoomCap.max;
@@ -263,9 +356,8 @@
     els.zoom.disabled = false;
 
     const modes = getFocusModes();
-    const canContinuous = modes.includes('continuous');
     els.autoFocus.disabled = !track;
-    els.focusStatus.textContent = canContinuous
+    els.focusStatus.textContent = modes.includes('continuous')
       ? 'Auto-Fokus aktiv · ins Bild tippen für Fokuspunkt.'
       : 'Kamera-Autofokus aktiv · Fokuspunkt wird beim Tippen versucht.';
 
@@ -332,6 +424,12 @@
     els.scanFrame.classList.toggle('full-frame', els.roiMode.value === 'full');
   }
 
+  function drawCanvasPreview(sourceCanvas) {
+    const ctx = els.roiPreview.getContext('2d');
+    ctx.clearRect(0, 0, els.roiPreview.width, els.roiPreview.height);
+    ctx.drawImage(sourceCanvas, 0, 0, els.roiPreview.width, els.roiPreview.height);
+  }
+
   function cropFrame() {
     const view = getVisibleSourceRect();
     if (!view) return null;
@@ -359,7 +457,159 @@
       d[i] = d[i + 1] = d[i + 2] = g;
     }
     ctx.putImageData(img, 0, 0);
+    drawCanvasPreview(c);
     return c;
+  }
+
+  function getVehicleSampleCanvas() {
+    const view = getVisibleSourceRect();
+    if (!view) return null;
+    const x = view.x + view.w * 0.16;
+    const y = view.y + view.h * 0.18;
+    const w = view.w * 0.68;
+    const h = view.h * 0.52;
+    const c = els.vehicleCanvas;
+    c.width = 192; c.height = 108;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(els.video, x, y, w, h, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  function buildFeatureFromCanvas(canvas) {
+    const work = document.createElement('canvas');
+    work.width = 24; work.height = 14;
+    const ctx = work.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(canvas, 0, 0, work.width, work.height);
+    const data = ctx.getImageData(0, 0, work.width, work.height).data;
+    const vec = [];
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const gray = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+      vec.push(gray);
+      sum += gray;
+    }
+    const mean = sum / vec.length;
+    let norm = 0;
+    for (let i = 0; i < vec.length; i++) {
+      vec[i] -= mean;
+      norm += vec[i] * vec[i];
+    }
+    norm = Math.sqrt(norm) || 1;
+    for (let i = 0; i < vec.length; i++) vec[i] /= norm;
+    return vec;
+  }
+
+  function similarityFromFeatures(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+    const scaled = Math.round(clamp((dot + 1) * 50, 0, 100));
+    return scaled;
+  }
+
+  function canvasToThumb(canvas) {
+    const thumb = document.createElement('canvas');
+    thumb.width = 160; thumb.height = 120;
+    thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height);
+    return thumb.toDataURL('image/jpeg', 0.82);
+  }
+
+  function drawImageCover(ctx, img, dw, dh) {
+    const sw = img.naturalWidth || img.videoWidth || img.width;
+    const sh = img.naturalHeight || img.videoHeight || img.height;
+    const sourceRatio = sw / sh;
+    const destRatio = dw / dh;
+    let sx = 0, sy = 0, sWidth = sw, sHeight = sh;
+    if (sourceRatio > destRatio) {
+      sWidth = sh * destRatio;
+      sx = (sw - sWidth) / 2;
+    } else {
+      sHeight = sw / destRatio;
+      sy = (sh - sHeight) / 2;
+    }
+    ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, dw, dh);
+  }
+
+  function loadImageFromFile(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
+      img.src = url;
+    });
+  }
+
+  async function addVehiclePhotos(files) {
+    const targetNormalized = els.photoTargetSelect.value;
+    const targets = getTargets();
+    const target = targets.find((t) => t.normalized === targetNormalized);
+    if (!target) {
+      showError('Bitte zuerst ein Zielkennzeichen auswählen, dem die Fotos zugeordnet werden sollen.');
+      return;
+    }
+    processingPhotoUpload = true;
+    clearError();
+    try {
+      for (const file of files) {
+        const img = await loadImageFromFile(file);
+        const c = document.createElement('canvas');
+        c.width = 192; c.height = 144;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        drawImageCover(ctx, img, c.width, c.height);
+        const feature = buildFeatureFromCanvas(c);
+        const ref = {
+          id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          targetNormalized: target.normalized,
+          targetRaw: target.raw,
+          fileName: file.name,
+          thumb: canvasToThumb(c),
+          feature
+        };
+        await dbPutRef(ref);
+      }
+      vehicleRefs = await dbGetAllRefs();
+      renderVehicleRefs();
+    } finally {
+      processingPhotoUpload = false;
+      els.vehiclePhotoInput.value = '';
+    }
+  }
+
+  async function renderVehicleRefs() {
+    if (processingPhotoUpload) return;
+    if (!vehicleRefs.length) vehicleRefs = await dbGetAllRefs();
+    const targets = getTargets();
+    const targetSet = new Set(targets.map((t) => t.normalized));
+    const visibleRefs = vehicleRefs.filter((r) => targetSet.size === 0 || targetSet.has(r.targetNormalized));
+    if (!visibleRefs.length) {
+      els.vehicleRefsSummary.textContent = 'Noch keine Referenzfotos.';
+      els.vehicleRefsGrid.innerHTML = '<div class="empty-log">Noch keine Referenzfotos.</div>';
+      return;
+    }
+    els.vehicleRefsSummary.textContent = `${visibleRefs.length} Referenzfoto(s) gespeichert.`;
+    els.vehicleRefsGrid.innerHTML = visibleRefs.map((ref) => `
+      <div class="ref-card">
+        <img src="${ref.thumb}" alt="${escapeHtml(ref.targetRaw)}" />
+        <div class="ref-meta">
+          <strong>${escapeHtml(ref.targetRaw)}</strong>
+          <span>${escapeHtml(ref.fileName || 'Referenzfoto')}</span>
+        </div>
+      </div>`).join('');
+  }
+
+  function getBestVehicleMatch(currentFeature, ocrBest) {
+    if (!els.vehicleAssistToggle.checked || !currentFeature || !vehicleRefs.length) return null;
+    const filtered = ocrBest
+      ? vehicleRefs.filter((r) => r.targetNormalized === ocrBest.target.normalized)
+      : vehicleRefs;
+    const pool = filtered.length ? filtered : vehicleRefs;
+    let best = null;
+    for (const ref of pool) {
+      const score = similarityFromFeatures(currentFeature, ref.feature);
+      if (!best || score > best.score) best = { score, ref };
+    }
+    return best;
   }
 
   async function setZoom(value) {
@@ -377,7 +627,6 @@
       if (modes.includes('continuous')) values.focusMode = 'continuous';
       await applyAdvanced(values);
     } catch (err) {
-      console.warn('hardware zoom failed; switching to digital zoom', err);
       hardwareZoom = false;
       digitalZoom = 1;
       els.zoom.min = '1';
@@ -406,7 +655,7 @@
   }
 
   async function focusAtPoint(event) {
-    if (!running || !track || event.target.closest('.hit-overlay')) return;
+    if (!running || !track || event.target.closest('.alert-banner')) return;
     const rect = els.stage.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     const rx = clamp((event.clientX - rect.left) / rect.width, 0, 1);
@@ -433,7 +682,6 @@
         els.focusStatus.textContent = 'Safari gibt keinen Fokuspunkt frei · Autofokus bleibt aktiv.';
       }
     } catch (err) {
-      console.warn('tap focus not available', err);
       await enableContinuousFocus(true);
       els.focusStatus.textContent = 'Fokuspunkt von Safari nicht steuerbar · Autofokus aktiv.';
     }
@@ -447,7 +695,6 @@
       await applyAdvanced({ focusMode: 'manual', focusDistance: v, ...getZoomConstraint(Number(els.zoom.value)) });
       els.focusStatus.textContent = `Manueller Fokus ${fmt(v, 2)}`;
     } catch (err) {
-      console.warn('manual focus not available', err);
       els.focusStatus.textContent = 'Manueller Fokus wurde von Safari nicht übernommen.';
     }
   }
@@ -476,7 +723,9 @@
     lastScanStartedAt = started;
     try {
       const frame = cropFrame();
+      const vehicleCanvas = getVehicleSampleCanvas();
       if (!frame) return;
+
       const result = await worker.recognize(frame);
       const duration = performance.now() - started;
       scans += 1;
@@ -493,6 +742,7 @@
         els.lastOcr.textContent = '—';
         els.closestTarget.textContent = 'Keine Ziele';
         els.similarity.textContent = '—';
+        els.vehicleScore.textContent = '—';
         return;
       }
 
@@ -501,14 +751,36 @@
       els.closestTarget.textContent = best ? prettyPlate(best.target.raw) : '—';
       els.similarity.textContent = best ? `${best.similarity} %` : '—';
 
+      let bestVehicle = null;
+      if (vehicleCanvas && vehicleRefs.length) {
+        const feature = buildFeatureFromCanvas(vehicleCanvas);
+        bestVehicle = getBestVehicleMatch(feature, best);
+      }
+      els.vehicleScore.textContent = bestVehicle ? `${bestVehicle.score} % · ${prettyPlate(bestVehicle.ref.targetRaw)}` : '—';
+
       const allowed = els.tolerant.checked ? 1 : 0;
       if (best && best.value && best.distance <= allowed) {
         const key = best.target.normalized;
         const now = Date.now();
-        const previousHit = lastHitAt.get(key) || 0;
-        if (now - previousHit > 5000) {
+        if (now - (lastHitAt.get(key) || 0) > 5000) {
           lastHitAt.set(key, now);
-          await registerHit(best.target.raw, best.value);
+          await registerEvent('hit', best.target.raw, { recognized: best.value, score: bestVehicle?.score ?? null });
+        }
+      } else if (bestVehicle && bestVehicle.score >= Number(els.vehicleThreshold.value || 88)) {
+        const targetNorm = bestVehicle.ref.targetNormalized;
+        const ocrSupport = best && best.target.normalized === targetNorm && best.similarity >= 55;
+        const noOcrButStrong = (!best || best.similarity < 55) && bestVehicle.score >= Math.min(96, Number(els.vehicleThreshold.value || 88) + 6);
+        if (ocrSupport || noOcrButStrong) {
+          const key = targetNorm;
+          const now = Date.now();
+          if (now - (lastHintAt.get(key) || 0) > 6000) {
+            lastHintAt.set(key, now);
+            await registerEvent('hint', bestVehicle.ref.targetRaw, {
+              recognized: best?.value || '',
+              score: bestVehicle.score,
+              message: ocrSupport ? 'Foto + OCR passen zusammen' : 'Starke Bildähnlichkeit'
+            });
+          }
         }
       }
       if (running) setStatus('Scan aktiv', 'active');
@@ -522,33 +794,63 @@
     }
   }
 
-  async function registerHit(targetRaw, recognized) {
-    hits += 1;
-    els.hitCount.textContent = String(hits);
+  async function registerEvent(kind, targetRaw, meta = {}) {
     const plate = prettyPlate(targetRaw);
-    els.hitPlate.textContent = plate;
-    els.overlay.hidden = false;
-    setStatus('TREFFER', 'hit');
-    await soundAlarm();
-    const entry = { plate, recognized, time: new Date().toISOString() };
-    const log = JSON.parse(localStorage.getItem('plateHitLog') || '[]');
+    if (kind === 'hit') {
+      hits += 1;
+      els.hitCount.textContent = String(hits);
+      setStatus('TREFFER', 'hit');
+      showBanner('hit', 'TREFFER', plate, 2600);
+      await playBeeps('hit');
+    } else {
+      hints += 1;
+      els.hintCount.textContent = String(hints);
+      setStatus('Hinweis', 'warn');
+      const hintText = meta.message ? `${plate} · ${meta.message}` : plate;
+      showBanner('warn', 'HINWEIS', hintText, 2200);
+      await playBeeps('hint');
+    }
+
+    const entry = {
+      kind,
+      plate,
+      recognized: meta.recognized || '',
+      score: meta.score ?? null,
+      message: meta.message || '',
+      time: new Date().toISOString()
+    };
+    const log = JSON.parse(localStorage.getItem('plateEventLog') || '[]');
     log.unshift(entry);
-    localStorage.setItem('plateHitLog', JSON.stringify(log.slice(0, 30)));
+    localStorage.setItem('plateEventLog', JSON.stringify(log.slice(0, 40)));
     renderLog();
-    setTimeout(() => { els.overlay.hidden = true; if (running) setStatus('Scan aktiv', 'active'); }, 2500);
   }
 
   function renderLog() {
-    const log = JSON.parse(localStorage.getItem('plateHitLog') || '[]');
-    if (!log.length) { els.hitLog.innerHTML = '<div class="empty-log">Noch keine Treffer.</div>'; return; }
+    const log = JSON.parse(localStorage.getItem('plateEventLog') || '[]');
+    if (!log.length) {
+      els.hitLog.innerHTML = '<div class="empty-log">Noch keine Treffer oder Hinweise.</div>';
+      return;
+    }
     els.hitLog.innerHTML = log.map((e) => {
       const d = new Date(e.time);
-      return `<div class="log-entry"><strong>${escapeHtml(e.plate)}</strong><span>${d.toLocaleDateString('de-DE')} · ${d.toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
+      const secondary = [
+        e.recognized ? `OCR: ${escapeHtml(e.recognized)}` : '',
+        Number.isFinite(e.score) ? `Foto: ${e.score} %` : '',
+        e.message ? escapeHtml(e.message) : ''
+      ].filter(Boolean).join(' · ');
+      return `<div class="log-entry">
+        <div class="log-head">
+          <div><span class="kind ${e.kind === 'hit' ? 'hit' : 'hint'}">${e.kind === 'hit' ? 'TREFFER' : 'HINWEIS'}</span></div>
+          <strong>${escapeHtml(e.plate)}</strong>
+          ${secondary ? `<span>${secondary}</span>` : ''}
+        </div>
+        <span>${d.toLocaleDateString('de-DE')} · ${d.toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit', second:'2-digit'})}</span>
+      </div>`;
     }).join('');
   }
 
   function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
   }
 
   async function start() {
@@ -569,6 +871,8 @@
       running = true;
       els.stop.disabled = false;
       els.targets.disabled = true;
+      els.photoTargetSelect.disabled = true;
+      els.vehiclePhotoInput.disabled = true;
       await requestWakeLock();
       setStatus('OCR wird geladen …', 'busy');
 
@@ -608,6 +912,7 @@
     videoFrameRequest = null;
     clearTimeout(zoomApplyTimer);
     clearTimeout(focusRingTimer);
+    clearTimeout(alertTimer);
     if (stream) stream.getTracks().forEach((t) => t.stop());
     stream = null;
     track = null;
@@ -618,7 +923,7 @@
     els.video.style.transform = '';
     els.placeholder.style.display = '';
     els.cameraHud.hidden = true;
-    els.overlay.hidden = true;
+    els.alertBanner.hidden = true;
     els.focusRing.hidden = true;
     els.zoom.disabled = true;
     els.zoom.value = '1';
@@ -630,6 +935,8 @@
     els.start.disabled = false;
     els.stop.disabled = true;
     els.targets.disabled = false;
+    els.photoTargetSelect.disabled = false;
+    els.vehiclePhotoInput.disabled = false;
     await releaseWakeLock();
     setStatus('Bereit', 'idle');
   }
@@ -637,16 +944,16 @@
   els.start.addEventListener('click', start);
   els.stop.addEventListener('click', stop);
   els.testAlarm.addEventListener('click', async () => {
-    els.hitPlate.textContent = prettyPlate(getTargets()[0]?.raw || 'TEST');
-    els.overlay.hidden = false;
-    await soundAlarm();
-    setTimeout(() => { els.overlay.hidden = true; }, 1800);
+    const target = getTargets()[0]?.raw || 'TEST';
+    showBanner('hit', 'TREFFER', prettyPlate(target), 1800);
+    await playBeeps('hit');
   });
-  els.clearLog.addEventListener('click', () => { localStorage.removeItem('plateHitLog'); renderLog(); });
+  els.clearLog.addEventListener('click', () => {
+    localStorage.removeItem('plateEventLog');
+    renderLog();
+  });
   els.targets.addEventListener('input', updateTargetCount);
-  els.interval.addEventListener('change', () => {
-    if (running && !busy) scheduleNextScan(0);
-  });
+  els.interval.addEventListener('change', () => { if (running && !busy) scheduleNextScan(0); });
   els.roiMode.addEventListener('change', updateRoiFrame);
   els.wake.addEventListener('change', async () => { if (running) els.wake.checked ? requestWakeLock() : releaseWakeLock(); });
   els.zoom.addEventListener('input', () => {
@@ -662,21 +969,41 @@
   els.zoom.addEventListener('change', () => setZoom(els.zoom.value));
   els.stage.addEventListener('click', focusAtPoint);
   els.autoFocus.addEventListener('click', () => enableContinuousFocus(false));
-  els.focus.addEventListener('input', () => {
-    els.focusValue.textContent = fmt(Number(els.focus.value), 2);
-  });
+  els.focus.addEventListener('input', () => { els.focusValue.textContent = fmt(Number(els.focus.value), 2); });
   els.focus.addEventListener('change', () => setManualFocus(els.focus.value));
   els.video.addEventListener('loadedmetadata', updateStageRatio);
   els.video.addEventListener('resize', updateStageRatio);
+  els.vehiclePhotoInput.addEventListener('change', async (event) => {
+    const files = [...(event.target.files || [])];
+    if (files.length) await addVehiclePhotos(files);
+  });
+  els.clearTargetRefsBtn.addEventListener('click', async () => {
+    const target = els.photoTargetSelect.value;
+    if (!target) return;
+    await dbClearTargetRefs(target);
+    vehicleRefs = await dbGetAllRefs();
+    renderVehicleRefs();
+  });
+  els.clearAllRefsBtn.addEventListener('click', async () => {
+    await dbClearAllRefs();
+    vehicleRefs = [];
+    renderVehicleRefs();
+  });
 
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible' && running && els.wake.checked) await requestWakeLock();
   });
   window.addEventListener('pagehide', stop);
 
-  const savedTargets = localStorage.getItem('plateTargets');
-  if (savedTargets && savedTargets.trim()) els.targets.value = savedTargets;
-  updateTargetCount();
-  updateRoiFrame();
-  renderLog();
+  async function init() {
+    const savedTargets = localStorage.getItem('plateTargets');
+    if (savedTargets && savedTargets.trim()) els.targets.value = savedTargets;
+    vehicleRefs = await dbGetAllRefs().catch(() => []);
+    updateTargetCount();
+    updateRoiFrame();
+    renderLog();
+    renderVehicleRefs();
+  }
+
+  init();
 })();
