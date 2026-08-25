@@ -20,15 +20,15 @@ const els={
   detectorMetric:$('detectorMetric')
 };
 
-const APP_VERSION='9.5.0';
+const APP_VERSION='9.5.1';
 const MODEL_URL='https://raw.githubusercontent.com/MikeLud/Blue-Iris-Custom-AI-Models/main/Custom-YOLOv8-11/plates.onnx';
 const MODEL_SIZE=640;
-let DETECT_CONF=.45;
+let DETECT_CONF=.58;
 const NMS_IOU=.70;
 const DETECT_EVERY_MS=20;
 const TRACK_TTL=1150;
 const YELLOW_CONFIRMATIONS=2;
-const INSTANT_YELLOW_CONF=.72;
+const INSTANT_YELLOW_CONF=.82;
 const MAX_VISIBLE_PLATES=2;
 const GREEN_CONFIRMATIONS=2;
 const RED_CONFIRMATIONS=2;
@@ -171,13 +171,21 @@ function parseYolo(output,prep){
     if(areaRatio<0.00005||areaRatio>0.18)continue;
     if(bw>prep.crop.w*.85||bh>prep.crop.h*.40)continue;
 
-    dets.push({
+    const det={
       x:clamp(prep.crop.x+x1,prep.crop.x,prep.crop.x+prep.crop.w-1),
       y:clamp(prep.crop.y+y1,prep.crop.y,prep.crop.y+prep.crop.h-1),
       w:clamp(bw,1,prep.crop.w),
       h:clamp(bh,1,prep.crop.h),
       conf
-    });
+    };
+
+    const texture=plateTextureScore(det);
+    det.texture=texture;
+
+    // Very strong detections can pass directly. Moderate detections need
+    // plausible character texture to prevent footwell/dashboard false positives.
+    if(conf<INSTANT_YELLOW_CONF && texture<55)continue;
+    dets.push(det);
   }
   dets.sort((a,b)=>b.conf-a.conf);
   const keep=[];
@@ -199,6 +207,52 @@ function iou(a,b){
 function smooth(a,b){
   return{x:a.x*.35+b.x*.65,y:a.y*.35+b.y*.65,w:a.w*.35+b.w*.65,h:a.h*.35+b.h*.65}
 }
+
+function plateTextureScore(box){
+  // Cheap local check: a real plate should contain alternating bright background
+  // and many dark, mostly vertical character edges. No OCR needed.
+  const vw=els.video.videoWidth,vh=els.video.videoHeight;
+  const x=clamp(Math.floor(box.x),0,vw-1),y=clamp(Math.floor(box.y),0,vh-1);
+  const w=clamp(Math.floor(box.w),1,vw-x),h=clamp(Math.floor(box.h),1,vh-y);
+  if(w<18||h<7)return 0;
+
+  const c=els.canvas,ctx=c.getContext('2d',{willReadFrequently:true});
+  const W=160,H=48;
+  c.width=W;c.height=H;
+  ctx.filter='grayscale(1) contrast(1.3)';
+  ctx.drawImage(els.video,x,y,w,h,0,0,W,H);
+  ctx.filter='none';
+
+  const d=ctx.getImageData(0,0,W,H).data;
+  const g=new Uint8Array(W*H);
+  let mean=0;
+  for(let i=0,p=0;i<d.length;i+=4,p++){g[p]=d[i];mean+=d[i]}
+  mean/=g.length;
+
+  let dark=0,bright=0,vEdges=0,hEdges=0;
+  for(let yy=1;yy<H-1;yy++){
+    for(let xx=1;xx<W-1;xx++){
+      const i=yy*W+xx,val=g[i];
+      if(val<mean-22)dark++;
+      if(val>mean+22)bright++;
+      vEdges+=Math.abs(g[i+1]-g[i-1]);
+      hEdges+=Math.abs(g[i+W]-g[i-W]);
+    }
+  }
+  const n=(W-2)*(H-2);
+  const darkRatio=dark/n,brightRatio=bright/n;
+  const edge=vEdges/n;
+  const verticalDominance=vEdges/Math.max(1,hEdges);
+
+  let score=0;
+  if(mean>70&&mean<225)score+=20;
+  if(darkRatio>.08&&darkRatio<.55)score+=20;
+  if(brightRatio>.08&&brightRatio<.72)score+=15;
+  if(edge>24)score+=25;
+  if(verticalDominance>.75)score+=20;
+  return score;
+}
+
 function updateTracks(dets){
   const now=Date.now(),unmatched=new Set(dets.map((_,i)=>i));
   for(const t of tracks){
@@ -208,6 +262,7 @@ function updateTracks(dets){
       const d=dets[bi];
       t.box=smooth(t.box,d);
       t.conf=d.conf;
+      t.texture=d.texture||0;
       t.lastSeen=now;
       t.confirmations=Math.min(10,(t.confirmations||1)+1);
       t.misses=0;
@@ -222,7 +277,7 @@ function updateTracks(dets){
     tracks.push({
       id:nextTrackId++,box:{...d},conf:d.conf,lastSeen:now,
       state:'pending',label:'Kennzeichen erkannt',history:[],lastOcrAt:0,
-      greenUntil:0,redUntil:0,confirmations:1,misses:0
+      greenUntil:0,redUntil:0,confirmations:1,misses:0,texture:d.texture||0
     });
   }
 
@@ -254,7 +309,9 @@ function renderTracks(){
     d.className=`plate-box ${t.state}`;
     d.style.left=`${clamp(p.left,0,els.stage.clientWidth-4)}px`;d.style.top=`${clamp(p.top,0,els.stage.clientHeight-4)}px`;
     d.style.width=`${clamp(p.width,24,els.stage.clientWidth)}px`;d.style.height=`${clamp(p.height,10,els.stage.clientHeight)}px`;
-    d.querySelector('.plate-label').textContent=t.label||(t.state==='yellow'?'Kennzeichen erkannt':'');
+    d.querySelector('.plate-label').textContent=
+      t.state==='yellow' ? `Kennzeichen ${Math.round(t.conf*100)} %` :
+      (t.label||'');
   }
 }
 
@@ -518,7 +575,7 @@ document.addEventListener('visibilitychange',async()=>{if(document.visibilitySta
 async function initServiceWorker(){
   if(!('serviceWorker'in navigator))return;let reloading=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading)return;if(running){pendingReload=true;return}reloading=true;location.reload()});
-  try{const reg=await navigator.serviceWorker.register('./sw.js?v=95',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
+  try{const reg=await navigator.serviceWorker.register('./sw.js?v=951',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
 }
 const savedThreshold=Number(localStorage.getItem('aklsDetectorThreshold'));
 if(Number.isFinite(savedThreshold)&&savedThreshold>=.35&&savedThreshold<=.85)DETECT_CONF=savedThreshold;
