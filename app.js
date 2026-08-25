@@ -20,14 +20,15 @@ const els={
   detectorMetric:$('detectorMetric')
 };
 
-const APP_VERSION='9.4.3';
+const APP_VERSION='9.5.0';
 const MODEL_URL='https://raw.githubusercontent.com/MikeLud/Blue-Iris-Custom-AI-Models/main/Custom-YOLOv8-11/plates.onnx';
 const MODEL_SIZE=640;
-let DETECT_CONF=.55;
+let DETECT_CONF=.45;
 const NMS_IOU=.70;
-const DETECT_EVERY_MS=280;
-const TRACK_TTL=950;
+const DETECT_EVERY_MS=20;
+const TRACK_TTL=1150;
 const YELLOW_CONFIRMATIONS=2;
+const INSTANT_YELLOW_CONF=.72;
 const MAX_VISIBLE_PLATES=2;
 const GREEN_CONFIRMATIONS=2;
 const RED_CONFIRMATIONS=2;
@@ -243,7 +244,7 @@ function renderTracks(){
   for(const t of tracks){
     if(t.redUntil>now)t.state='red';
     else if(t.greenUntil>now)t.state='green';
-    else if((t.confirmations||0)>=YELLOW_CONFIRMATIONS)t.state='yellow';
+    else if((t.confirmations||0)>=YELLOW_CONFIRMATIONS || t.conf>=INSTANT_YELLOW_CONF)t.state='yellow';
     else t.state='pending';
 
     if(t.state==='pending')continue;
@@ -294,27 +295,111 @@ async function detectOnce(){
   }
 }
 
-function plateCrop(track){
+function plateCrop(track,variant='contrast'){
   const b=track.box,vw=els.video.videoWidth,vh=els.video.videoHeight;
-  const px=b.w*.10,py=b.h*.30;
-  const x=clamp(b.x-px,0,vw-1),y=clamp(b.y-py,0,vh-1),w=clamp(b.w+2*px,1,vw-x),h=clamp(b.h+2*py,1,vh-y);
-  const scale=Math.min(3,1000/w);
-  els.canvas.width=Math.max(1,Math.round(w*scale));els.canvas.height=Math.max(1,Math.round(h*scale));
+  const px=b.w*.16,py=b.h*.45;
+  const x=clamp(b.x-px,0,vw-1),y=clamp(b.y-py,0,vh-1),
+        w=clamp(b.w+2*px,1,vw-x),h=clamp(b.h+2*py,1,vh-y);
+
+  // Upscale aggressively because moving plates are often only a few pixels high.
+  const targetW=Math.min(1400,Math.max(700,w*4));
+  const scale=targetW/w;
+  els.canvas.width=Math.max(1,Math.round(w*scale));
+  els.canvas.height=Math.max(1,Math.round(h*scale));
   const ctx=els.canvas.getContext('2d',{willReadFrequently:true});
-  ctx.filter='grayscale(1) contrast(1.65) brightness(1.08)';
-  ctx.drawImage(els.video,x,y,w,h,0,0,els.canvas.width,els.canvas.height);ctx.filter='none';
+
+  if(variant==='contrast'){
+    ctx.filter='grayscale(1) contrast(1.9) brightness(1.08)';
+    ctx.drawImage(els.video,x,y,w,h,0,0,els.canvas.width,els.canvas.height);
+    ctx.filter='none';
+  }else{
+    ctx.filter='grayscale(1) contrast(1.45) brightness(1.12)';
+    ctx.drawImage(els.video,x,y,w,h,0,0,els.canvas.width,els.canvas.height);
+    ctx.filter='none';
+
+    const im=ctx.getImageData(0,0,els.canvas.width,els.canvas.height);
+    const d=im.data;
+    let sum=0;
+    for(let i=0;i<d.length;i+=4)sum+=d[i];
+    const mean=sum/(d.length/4);
+    const threshold=clamp(mean*.94,85,185);
+    for(let i=0;i<d.length;i+=4){
+      const v=d[i]>threshold?255:0;
+      d[i]=d[i+1]=d[i+2]=v;
+    }
+    ctx.putImageData(im,0,0);
+  }
   return els.canvas;
 }
+
+function extractOcrCandidates(data){
+  const values=[];
+  const push=(text,conf)=>{
+    const n=normalize(text),c=Number(conf)||0;
+    if(n.length<4||n.length>10)return;
+    if(!/[A-Z]/.test(n)||!/\d/.test(n))return;
+    values.push({text:n,conf:c});
+  };
+
+  push(data.text,data.confidence);
+  for(const w of data.words||[])push(w.text,w.confidence||data.confidence);
+  for(const b of data.blocks||[])
+    for(const p of b.paragraphs||[])
+      for(const l of p.lines||[]){
+        push(l.text,l.confidence||data.confidence);
+        for(const w of l.words||[])push(w.text,w.confidence||l.confidence||data.confidence);
+      }
+
+  values.sort((a,b)=>{
+    const pa=germanPlatePlausibility(a.text),pb=germanPlatePlausibility(b.text);
+    return (b.conf+pb)-(a.conf+pa);
+  });
+  return values[0]||null;
+}
+
+async function recognizeTrack(t){
+  // Fast first pass. Only do the binary pass if the first result is weak.
+  const r1=await ocrWorker.recognize(plateCrop(t,'contrast'),{}, {text:true,blocks:true});
+  let best=extractOcrCandidates(r1.data);
+
+  if(!best || best.conf<45 || germanPlatePlausibility(best.text)<20){
+    const r2=await ocrWorker.recognize(plateCrop(t,'binary'),{}, {text:true,blocks:true});
+    const alt=extractOcrCandidates(r2.data);
+    if(alt && (!best || alt.conf+germanPlatePlausibility(alt.text) > best.conf+germanPlatePlausibility(best.text))){
+      best=alt;
+    }
+  }
+  return best;
+}
+
 function consensus(t){
-  const now=Date.now();t.history=t.history.filter(x=>now-x.time<2800).slice(-6);
+  const now=Date.now();
+  t.history=t.history.filter(x=>now-x.time<3200).slice(-8);
+  if(!t.history.length)return null;
+
   const groups=[];
   for(const h of t.history){
-    let g=groups.find(x=>weightedDistance(x.text,h.text)<=.45);
-    if(!g){g={text:h.text,count:0,conf:0};groups.push(g)}
-    g.count++;g.conf+=h.conf;
+    let g=groups.find(x=>weightedDistance(x.seed,h.text)<=1.05);
+    if(!g){g={seed:h.text,items:[],count:0,conf:0};groups.push(g)}
+    g.items.push(h);g.count++;g.conf+=h.conf;
   }
   groups.sort((a,b)=>b.count-a.count||b.conf-a.conf);
-  return groups[0]||null;
+  const g=groups[0];
+
+  const same=g.items.filter(x=>x.text.length===g.seed.length);
+  if(same.length>=2){
+    let text='';
+    for(let i=0;i<g.seed.length;i++){
+      const votes=new Map();
+      for(const item of same){
+        const ch=item.text[i];
+        votes.set(ch,(votes.get(ch)||0)+Math.max(1,item.conf));
+      }
+      text += [...votes.entries()].sort((a,b)=>b[1]-a[1])[0][0];
+    }
+    return{text,count:g.count,conf:g.conf};
+  }
+  return{text:g.seed,count:g.count,conf:g.conf};
 }
 function targetVote(t){
   const votes=new Map();
@@ -331,15 +416,15 @@ function targetVote(t){
 async function scheduleOcr(){
   if(!running||ocrBusy)return;
   const now=Date.now();
-  const live=tracks.filter(t=>now-t.lastSeen<650 && (t.confirmations||0)>=YELLOW_CONFIRMATIONS).sort((a,b)=>(now-b.lastOcrAt)-(now-a.lastOcrAt)||b.conf-a.conf);
+  const live=tracks.filter(t=>now-t.lastSeen<800 && ((t.confirmations||0)>=YELLOW_CONFIRMATIONS || t.conf>=INSTANT_YELLOW_CONF)).sort((a,b)=>(now-b.lastOcrAt)-(now-a.lastOcrAt)||b.conf-a.conf);
   const t=live[0];if(!t)return;
   ocrBusy=true;t.lastOcrAt=now;
   const started=performance.now();
   try{
-    const result=await ocrWorker.recognize(plateCrop(t));
+    const read=await recognizeTrack(t);
     scans++;els.scanCount.textContent=String(scans);els.ocrTime.textContent=`${Math.round(performance.now()-started)} ms`;
-    const text=normalize(result.data.text),conf=Number(result.data.confidence)||0;
-    if(text.length>=4&&text.length<=10&&conf>=Math.max(20,Number(els.confidence.value)-20)&&germanPlatePlausibility(text)>=20){
+    const text=read?.text||'',conf=read?.conf||0;
+    if(text.length>=4&&text.length<=10&&conf>=Math.max(12,Number(els.confidence.value)-30)&&germanPlatePlausibility(text)>=15){
       t.history.push({text,conf,time:Date.now()});
       const c=consensus(t);
       if(c){
@@ -433,7 +518,7 @@ document.addEventListener('visibilitychange',async()=>{if(document.visibilitySta
 async function initServiceWorker(){
   if(!('serviceWorker'in navigator))return;let reloading=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading)return;if(running){pendingReload=true;return}reloading=true;location.reload()});
-  try{const reg=await navigator.serviceWorker.register('./sw.js?v=943',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
+  try{const reg=await navigator.serviceWorker.register('./sw.js?v=95',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
 }
 const savedThreshold=Number(localStorage.getItem('aklsDetectorThreshold'));
 if(Number.isFinite(savedThreshold)&&savedThreshold>=.35&&savedThreshold<=.85)DETECT_CONF=savedThreshold;

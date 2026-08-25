@@ -7,19 +7,19 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="AKLS">
-  <title>AKLS V9.4.3</title>
-  <link rel="manifest" href="manifest.webmanifest?v=943">
-  <link rel="icon" href="icon-512.png?v=943" type="image/png">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=943">
-  <link rel="stylesheet" href="styles.css?v=943">
+  <title>AKLS V9.5</title>
+  <link rel="manifest" href="manifest.webmanifest?v=95">
+  <link rel="icon" href="icon-512.png?v=95" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=95">
+  <link rel="stylesheet" href="styles.css?v=95">
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
-  <script defer src="app.js?v=943"></script>
+  <script defer src="app.js?v=95"></script>
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
-      <div class="brand"><img src="apple-touch-icon.png?v=943" alt="AKLS"><div><div class="eyebrow">AKLS · V9.4.3</div><h1>Kennzeichen-Wächter</h1></div></div>
+      <div class="brand"><img src="apple-touch-icon.png?v=95" alt="AKLS"><div><div class="eyebrow">AKLS · V9.5</div><h1>Kennzeichen-Wächter</h1></div></div>
       <div id="statusPill" class="status-pill idle">Bereit</div>
     </header>
 
@@ -31,7 +31,7 @@
 
     <section id="setupView" class="view active-view">
       <section class="card hero-card">
-        <div><div class="section-title">AKLS V9.4.3</div><h2>Ziel festlegen und Scan starten</h2><p>Gelb = Kennzeichen-KI erkannt · Grün = OCR bestätigt · Rot = Zielkennzeichen bestätigt.</p></div>
+        <div><div class="section-title">AKLS V9.5</div><h2>Ziel festlegen und Scan starten</h2><p>Gelb = Kennzeichen-KI erkannt · Grün = OCR bestätigt · Rot = Zielkennzeichen bestätigt.</p></div>
         <button id="startBtn" class="button primary large" type="button">Scan starten</button>
       </section>
 
@@ -55,9 +55,10 @@
             <label>KI-Schwelle
               <div class="camera-control-head">
                 <span>Kennzeichen-KI</span>
-                <output id="detectorThresholdValue" for="detectorThreshold">55 %</output>
+                <output id="detectorThresholdValue" for="detectorThreshold">45 %</output>
               </div>
-              <input id="detectorThreshold" class="range" type="range" min="0.35" max="0.85" step="0.05" value="0.55" />
+              <input id="detectorThreshold" class="range" type="range" min="0.35" max="0.85" step="0.05" value="0.45" />
+              <small>45 % ist für bewegte Fahrzeuge optimiert; bei Fehlboxen erhöhen.</small>
             </label>
           </div>
         </details>
@@ -130,7 +131,7 @@
       <section class="card"><div class="section-title">Ereignisprotokoll</div><div id="hitLog" class="hit-log"><div class="empty-log">Noch keine Ereignisse.</div></div><button id="clearLogBtn" class="text-button" type="button">Protokoll löschen</button></section>
     </section>
 
-    <footer>AKLS V9.4.3 · automatische Aktualisierung · Verarbeitung lokal im Browser</footer>
+    <footer>AKLS V9.5 · automatische Aktualisierung · Verarbeitung lokal im Browser</footer>
   </main>
 </body>
 </html>

@@ -73,3 +73,6 @@
 /* V9.4.3 diagnostics */
 #detectorThreshold{width:100%}
 #detectorThresholdValue{font-weight:800}
+
+/* V9.5 moving vehicle tuning */
+.plate-box.yellow{transition:left .05s linear,top .05s linear,width .05s linear,height .05s linear}

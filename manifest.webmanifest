@@ -1,20 +1,20 @@
 {
   "name": "AKLS Kennzeichen-Wächter",
   "short_name": "AKLS",
-  "description": "AKLS V9.4.3: korrigierter 640x640 YOLO-Input mit sichtbarer KI-Schwelle",
-  "start_url": "./?v=943",
+  "description": "AKLS V9.5: schnellere Erkennung bewegter Kennzeichen und Multi-Frame-OCR",
+  "start_url": "./?v=95",
   "scope": "./",
   "display": "standalone",
   "background_color": "#090b0e",
   "theme_color": "#090b0e",
   "icons": [
     {
-      "src": "apple-touch-icon.png?v=943",
+      "src": "apple-touch-icon.png?v=95",
       "sizes": "180x180",
       "type": "image/png"
     },
     {
-      "src": "icon-512.png?v=943",
+      "src": "icon-512.png?v=95",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
