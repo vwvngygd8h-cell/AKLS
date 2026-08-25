@@ -20,7 +20,7 @@ const els={
   detectorMetric:$('detectorMetric')
 };
 
-const APP_VERSION='9.4.2';
+const APP_VERSION='9.4.3';
 const MODEL_URL='https://raw.githubusercontent.com/MikeLud/Blue-Iris-Custom-AI-Models/main/Custom-YOLOv8-11/plates.onnx';
 const MODEL_SIZE=640;
 let DETECT_CONF=.55;
@@ -433,7 +433,7 @@ document.addEventListener('visibilitychange',async()=>{if(document.visibilitySta
 async function initServiceWorker(){
   if(!('serviceWorker'in navigator))return;let reloading=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading)return;if(running){pendingReload=true;return}reloading=true;location.reload()});
-  try{const reg=await navigator.serviceWorker.register('./sw.js?v=942',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
+  try{const reg=await navigator.serviceWorker.register('./sw.js?v=943',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
 }
 const savedThreshold=Number(localStorage.getItem('aklsDetectorThreshold'));
 if(Number.isFinite(savedThreshold)&&savedThreshold>=.35&&savedThreshold<=.85)DETECT_CONF=savedThreshold;

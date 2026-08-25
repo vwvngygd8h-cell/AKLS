@@ -7,19 +7,19 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="AKLS">
-  <title>AKLS V9.4.2</title>
-  <link rel="manifest" href="manifest.webmanifest?v=942">
-  <link rel="icon" href="icon-512.png?v=942" type="image/png">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=942">
-  <link rel="stylesheet" href="styles.css?v=942">
+  <title>AKLS V9.4.3</title>
+  <link rel="manifest" href="manifest.webmanifest?v=943">
+  <link rel="icon" href="icon-512.png?v=943" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=943">
+  <link rel="stylesheet" href="styles.css?v=943">
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
-  <script defer src="app.js?v=942"></script>
+  <script defer src="app.js?v=943"></script>
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
-      <div class="brand"><img src="apple-touch-icon.png?v=942" alt="AKLS"><div><div class="eyebrow">AKLS · V9.4.2</div><h1>Kennzeichen-Wächter</h1></div></div>
+      <div class="brand"><img src="apple-touch-icon.png?v=943" alt="AKLS"><div><div class="eyebrow">AKLS · V9.4.3</div><h1>Kennzeichen-Wächter</h1></div></div>
       <div id="statusPill" class="status-pill idle">Bereit</div>
     </header>
 
@@ -31,7 +31,7 @@
 
     <section id="setupView" class="view active-view">
       <section class="card hero-card">
-        <div><div class="section-title">AKLS V9.4.2</div><h2>Ziel festlegen und Scan starten</h2><p>Gelb = Kennzeichen-KI erkannt · Grün = OCR bestätigt · Rot = Zielkennzeichen bestätigt.</p></div>
+        <div><div class="section-title">AKLS V9.4.3</div><h2>Ziel festlegen und Scan starten</h2><p>Gelb = Kennzeichen-KI erkannt · Grün = OCR bestätigt · Rot = Zielkennzeichen bestätigt.</p></div>
         <button id="startBtn" class="button primary large" type="button">Scan starten</button>
       </section>
 
@@ -52,6 +52,13 @@
             <label>OCR-Intervall<select id="scanInterval"><option value="500">0,5 s</option><option value="750" selected>0,75 s</option><option value="1000">1,0 s</option><option value="1500">1,5 s</option></select></label>
             <label>Scanbereich<select id="roiMode"><option value="center" selected>Mitte</option><option value="wide">Breit</option><option value="full">Ganzes Bild</option></select></label>
             <label>OCR-Sicherheit<select id="ocrConfidence"><option value="45">empfindlich</option><option value="55" selected>ausgewogen</option><option value="65">streng</option></select></label>
+            <label>KI-Schwelle
+              <div class="camera-control-head">
+                <span>Kennzeichen-KI</span>
+                <output id="detectorThresholdValue" for="detectorThreshold">55 %</output>
+              </div>
+              <input id="detectorThreshold" class="range" type="range" min="0.35" max="0.85" step="0.05" value="0.55" />
+            </label>
           </div>
         </details>
       </section>
@@ -70,7 +77,7 @@
           <div id="cameraStage" class="camera-stage">
             <video id="video" playsinline webkit-playsinline muted autoplay></video>
             <canvas id="captureCanvas" hidden></canvas>
-            <canvas id="detectorCanvas" width="192" height="108" hidden></canvas>
+            <canvas id="detectorCanvas" width="640" height="640" hidden></canvas>
             <div id="plateOverlay" class="plate-overlay" aria-hidden="true"></div>
             <div id="scanGuide" class="scan-guide" aria-hidden="true"></div>
             <div id="alertBanner" class="alert-banner" hidden><div id="alertType" class="alert-type">TREFFER</div><div id="alertText" class="alert-text">NB-BC 721</div></div>
@@ -123,7 +130,7 @@
       <section class="card"><div class="section-title">Ereignisprotokoll</div><div id="hitLog" class="hit-log"><div class="empty-log">Noch keine Ereignisse.</div></div><button id="clearLogBtn" class="text-button" type="button">Protokoll löschen</button></section>
     </section>
 
-    <footer>AKLS V9.4.2 · automatische Aktualisierung · Verarbeitung lokal im Browser</footer>
+    <footer>AKLS V9.4.3 · automatische Aktualisierung · Verarbeitung lokal im Browser</footer>
   </main>
 </body>
 </html>

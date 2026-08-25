@@ -1,20 +1,20 @@
 {
   "name": "AKLS Kennzeichen-Wächter",
   "short_name": "AKLS",
-  "description": "AKLS V9.4.2: einstellbare YOLO-Schwelle mit Live-KI-Diagnose",
-  "start_url": "./?v=942",
+  "description": "AKLS V9.4.3: korrigierter 640x640 YOLO-Input mit sichtbarer KI-Schwelle",
+  "start_url": "./?v=943",
   "scope": "./",
   "display": "standalone",
   "background_color": "#090b0e",
   "theme_color": "#090b0e",
   "icons": [
     {
-      "src": "apple-touch-icon.png?v=942",
+      "src": "apple-touch-icon.png?v=943",
       "sizes": "180x180",
       "type": "image/png"
     },
     {
-      "src": "icon-512.png?v=942",
+      "src": "icon-512.png?v=943",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

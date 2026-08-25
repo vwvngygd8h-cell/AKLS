@@ -69,3 +69,7 @@
 
 /* V9.4.2 diagnostic controls */
 #detectorThresholdValue{font-weight:800}
+
+/* V9.4.3 diagnostics */
+#detectorThreshold{width:100%}
+#detectorThresholdValue{font-weight:800}
