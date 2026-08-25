@@ -1,78 +1,58 @@
 <!doctype html>
 <html lang="de">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#090b0e" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="AKLS" />
-  <title>AKLS Kennzeichen-Wächter</title>
-  <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=7" />
-  <link rel="stylesheet" href="styles.css?v=7" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#090b0e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AKLS">
+  <title>AKLS V8</title>
+  <link rel="manifest" href="manifest.webmanifest?v=8">
+  <link rel="icon" href="icon-512.png?v=8" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=8">
+  <link rel="stylesheet" href="styles.css?v=8">
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
-  <script defer src="app.js?v=7"></script>
+  <script defer src="app.js?v=8"></script>
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
-      <div><div class="eyebrow">AKLS · V7</div><h1>Kennzeichen-Wächter</h1></div>
+      <div class="brand"><img src="apple-touch-icon.png?v=8" alt="AKLS"><div><div class="eyebrow">AKLS · V8</div><h1>Kennzeichen-Wächter</h1></div></div>
       <div id="statusPill" class="status-pill idle">Bereit</div>
     </header>
 
-    <nav id="tabBar" class="tabbar" aria-label="Ansichten">
-      <button class="tab-button active" type="button" data-view="setupView">Einstellungen</button>
-      <button class="tab-button" type="button" data-view="scanView">Scan</button>
-      <button class="tab-button" type="button" data-view="logView">Protokoll</button>
+    <nav class="tabbar" aria-label="Ansichten">
+      <button class="tab-button active" data-view="setupView" type="button">Einstellungen</button>
+      <button class="tab-button" data-view="scanView" type="button">Scan</button>
+      <button class="tab-button" data-view="logView" type="button">Protokoll</button>
     </nav>
 
     <section id="setupView" class="view active-view">
-      <section class="control-card setup-hero">
-        <div><div class="section-title">Vor dem Start</div><h2>Ziele und Erkennung festlegen</h2><p>Nach dem Start wechselt AKLS automatisch in die reduzierte Kameraansicht.</p></div>
+      <section class="card hero-card">
+        <div><div class="section-title">AKLS V8</div><h2>Ziel festlegen und Scan starten</h2><p>Gelb = Kennzeichen erkannt · Grün = gelesen · Rot = gesuchtes Kennzeichen.</p></div>
         <button id="startBtn" class="button primary large" type="button">Scan starten</button>
       </section>
 
-      <section class="control-card">
+      <section class="card">
         <label class="field-label" for="targetPlates">Gesuchte Kennzeichen</label>
-        <div class="target-editor">
-          <textarea id="targetPlates" class="plate-input plate-list" rows="4" autocomplete="off" autocapitalize="characters" spellcheck="false">NB-BC 721</textarea>
-          <div class="target-meta"><span id="targetCount">1 Zielkennzeichen</span><span>Ein Kennzeichen pro Zeile</span></div>
-          <button id="testAlarmBtn" class="button secondary" type="button">Alarm testen</button>
-        </div>
+        <textarea id="targetPlates" class="plate-input" rows="3" autocomplete="off" autocapitalize="characters" spellcheck="false">NB-BC 721</textarea>
+        <div class="meta-row"><span id="targetCount">1 Zielkennzeichen</span><span>Ein Kennzeichen pro Zeile</span></div>
+        <button id="testAlarmBtn" class="button secondary" type="button">Alarm testen</button>
       </section>
 
-      <section class="control-card">
+      <section class="card">
         <div class="section-title">Erkennung</div>
-        <div class="settings-row">
-          <label class="switch-row"><input id="tolerantMode" type="checkbox" /><span class="switch"></span><span><strong>Tolerante Kennzeichen-Erkennung</strong><small>Erlaubt 1 OCR-Zeichenfehler</small></span></label>
-          <label class="switch-row"><input id="wakeLockToggle" type="checkbox" checked /><span class="switch"></span><span><strong>Bildschirm wach halten</strong><small>Empfohlen für den Dauerbetrieb</small></span></label>
-          <label class="switch-row"><input id="vehicleAssistToggle" type="checkbox" checked /><span class="switch"></span><span><strong>Fahrzeug-KI</strong><small>Referenzfotos als zusätzlicher Hinweis</small></span></label>
-        </div>
+        <label class="switch-row"><input id="tolerantMode" type="checkbox"><span class="switch"></span><span><strong>Toleranter Zielabgleich</strong><small>Erlaubt einen OCR-Zeichenfehler</small></span></label>
+        <label class="switch-row"><input id="wakeLockToggle" type="checkbox" checked><span class="switch"></span><span><strong>Bildschirm wach halten</strong><small>Empfohlen für den Dauerbetrieb</small></span></label>
         <details class="advanced">
           <summary>Feineinstellungen</summary>
           <div class="advanced-grid">
-            <label>Scan-Intervall<select id="scanInterval"><option value="0" selected>Maximal</option><option value="100">0,10 s</option><option value="200">0,20 s</option><option value="300">0,30 s</option><option value="500">0,50 s</option><option value="750">0,75 s</option><option value="1000">1,00 s</option></select></label>
-            <label>Scanbereich<select id="roiMode"><option value="center" selected>Mittleres Fenster</option><option value="wide">Breites Fenster</option><option value="full">Ganzes Bild</option></select></label>
-            <label>Foto-Hinweisschwelle<select id="vehicleThreshold"><option value="72">empfindlich</option><option value="78" selected>ausgewogen</option><option value="84">streng</option></select></label>
+            <label>OCR-Intervall<select id="scanInterval"><option value="500">0,5 s</option><option value="750" selected>0,75 s</option><option value="1000">1,0 s</option><option value="1500">1,5 s</option></select></label>
+            <label>Scanbereich<select id="roiMode"><option value="center" selected>Mitte</option><option value="wide">Breit</option><option value="full">Ganzes Bild</option></select></label>
+            <label>OCR-Sicherheit<select id="ocrConfidence"><option value="45">empfindlich</option><option value="55" selected>ausgewogen</option><option value="65">streng</option></select></label>
           </div>
         </details>
-      </section>
-
-      <section class="photo-card">
-        <div class="section-title">Fahrzeugfotos</div>
-        <div class="photo-controls">
-          <label>Fotos gehören zu<select id="photoTargetSelect"></select></label>
-          <label class="file-picker"><span>Fotos hinzufügen</span><input id="vehiclePhotoInput" type="file" accept="image/*" multiple /></label>
-        </div>
-        <div id="vehicleAiStatus" class="ai-status">KI-Fahrzeugerkennung wird bei Bedarf geladen.</div>
-        <div id="vehicleRefsSummary" class="refs-summary">Noch keine Referenzfotos.</div>
-        <div id="vehicleRefsGrid" class="refs-grid"><div class="empty-log">Noch keine Referenzfotos.</div></div>
-        <div class="photo-actions"><button id="clearTargetRefsBtn" class="button secondary compact" type="button">Fotos des Ziels löschen</button><button id="clearAllRefsBtn" class="button secondary compact" type="button">Alle Fotos löschen</button></div>
       </section>
       <div id="errorBox" class="error-box" hidden></div>
     </section>
@@ -80,63 +60,40 @@
     <section id="scanView" class="view" hidden>
       <section class="scan-shell">
         <div class="scan-topline">
-          <div class="scan-targets"><span>Ziele</span><strong id="activeTargets">1</strong></div>
+          <div><span>Ziele</span><strong id="activeTargets">1</strong></div>
           <div class="scan-state"><span id="scanPrimaryStatus">Bereit</span></div>
           <button id="stopBtn" class="button danger compact" type="button" disabled>Stoppen</button>
         </div>
 
-        <section class="camera-card scan-camera-card">
-          <div id="cameraStage" class="camera-stage" aria-label="Live-Kamerabild">
+        <section class="camera-card">
+          <div id="cameraStage" class="camera-stage">
             <video id="video" playsinline muted></video>
             <canvas id="captureCanvas" hidden></canvas>
-            <canvas id="vehicleCanvas" hidden></canvas>
-            <canvas id="roiPreview" width="320" height="120" hidden></canvas>
-            <div id="scanFrame" class="scan-frame" aria-hidden="true"><div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div></div>
-            <div id="vehicleBoxes" class="vehicle-boxes" aria-hidden="true"></div>
-            <div id="focusRing" class="focus-ring" hidden aria-hidden="true"></div>
-            <div id="cameraHud" class="camera-hud" hidden><span id="cameraResolution">—</span><span id="cameraZoomMode">Zoom —</span></div>
+            <canvas id="detectorCanvas" width="192" height="108" hidden></canvas>
+            <div id="plateOverlay" class="plate-overlay" aria-hidden="true"></div>
+            <div id="scanGuide" class="scan-guide" aria-hidden="true"></div>
             <div id="alertBanner" class="alert-banner" hidden><div id="alertType" class="alert-type">TREFFER</div><div id="alertText" class="alert-text">NB-BC 721</div></div>
             <div id="placeholder" class="camera-placeholder"><div class="camera-icon">◉</div><div>Scan noch nicht gestartet</div></div>
           </div>
-
-          <div class="camera-controls scan-controls">
-            <div class="camera-control-row zoom-block">
-              <div class="camera-control-head"><label for="zoomSlider">Zoom</label><output id="zoomValue" for="zoomSlider">1,0×</output></div>
-              <input id="zoomSlider" class="range" type="range" min="1" max="4" step="0.1" value="1" disabled />
-              <small id="zoomSupport">Wird nach Kamerastart geprüft.</small>
-            </div>
-            <div class="focus-controls scan-focus"><div><strong>Fokus</strong><small id="focusStatus">Nach dem Start ins Kamerabild tippen.</small></div><button id="autoFocusBtn" class="button compact secondary" type="button" disabled>Auto</button></div>
-            <div id="manualFocusGroup" class="camera-control-row manual-focus" hidden><div class="camera-control-head"><label for="focusSlider">Manueller Fokus</label><output id="focusValue" for="focusSlider">—</output></div><input id="focusSlider" class="range" type="range" min="0" max="1" step="0.01" value="0.5" /></div>
-          </div>
+          <div class="legend"><span><i class="dot yellow"></i>Kennzeichen erkannt</span><span><i class="dot green"></i>Korrekt gelesen</span><span><i class="dot red"></i>Zieltreffer</span></div>
         </section>
 
-        <section class="telemetry-card scan-telemetry">
-          <div class="metric"><span>OCR</span><strong id="lastOcr">—</strong></div>
+        <section class="telemetry-card">
+          <div class="metric"><span>Gelesen</span><strong id="lastOcr">—</strong></div>
           <div class="metric"><span>Ziel</span><strong id="closestTarget">—</strong></div>
           <div class="metric"><span>Match</span><strong id="similarity">—</strong></div>
-          <div class="metric"><span>Foto</span><strong id="vehicleScore">—</strong></div>
-          <div class="metric"><span>Rate</span><strong id="effectiveRate">—</strong></div>
+          <div class="metric"><span>OCR-Zeit</span><strong id="ocrTime">—</strong></div>
+          <div class="metric"><span>Scans</span><strong id="scanCount">0</strong></div>
           <div class="metric"><span>Treffer</span><strong id="hitCount">0</strong></div>
         </section>
-
-        <details class="advanced scan-details">
-          <summary>Weitere Live-Daten</summary>
-          <section class="telemetry-card details-telemetry">
-            <div class="metric"><span>OCR-Zeit</span><strong id="ocrTime">—</strong></div>
-            <div class="metric"><span>Scans</span><strong id="scanCount">0</strong></div>
-            <div class="metric"><span>Hinweise</span><strong id="hintCount">0</strong></div>
-            <div class="metric"><span>Fahrzeug-KI</span><strong id="vehicleAiMetric">—</strong></div>
-          </section>
-        </details>
       </section>
     </section>
 
     <section id="logView" class="view" hidden>
-      <section class="log-card"><div class="section-title">Ereignisprotokoll</div><div id="hitLog" class="hit-log"><div class="empty-log">Noch keine Treffer oder Hinweise.</div></div><button id="clearLogBtn" class="text-button" type="button">Protokoll löschen</button></section>
+      <section class="card"><div class="section-title">Ereignisprotokoll</div><div id="hitLog" class="hit-log"><div class="empty-log">Noch keine Ereignisse.</div></div><button id="clearLogBtn" class="text-button" type="button">Protokoll löschen</button></section>
     </section>
 
-    <div id="updateNotice" class="update-notice" hidden><span>Neue AKLS-Version verfügbar</span><button id="reloadUpdateBtn" type="button">Jetzt laden</button></div>
-    <footer>AKLS läuft lokal im Browser. Kamera und Scan funktionieren nur bei geöffneter App.</footer>
+    <footer>AKLS V8 · automatische Aktualisierung · Verarbeitung lokal im Browser</footer>
   </main>
 </body>
 </html>
