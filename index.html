@@ -11,8 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="styles.css" />
-  <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
-  <script defer src="app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script defer src="app.js?v=2"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -74,6 +74,7 @@
         <button id="startBtn" class="button primary" type="button">Scan starten</button>
         <button id="stopBtn" class="button danger" type="button" disabled>Stoppen</button>
       </div>
+      <div id="errorBox" hidden style="margin-top:12px;padding:12px;border-radius:10px;background:#3a1414;color:#ffd9d9;font-weight:600;white-space:pre-wrap"></div>
 
       <details class="advanced">
         <summary>Feineinstellungen</summary>
