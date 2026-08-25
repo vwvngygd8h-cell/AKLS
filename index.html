@@ -10,9 +10,9 @@
   <title>Kennzeichen-Wächter</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=3" />
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script defer src="app.js?v=2"></script>
+  <script defer src="app.js?v=3"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -25,22 +25,61 @@
     </header>
 
     <section class="camera-card">
-      <div id="cameraStage" class="camera-stage">
+      <div id="cameraStage" class="camera-stage" aria-label="Live-Kamerabild">
         <video id="video" playsinline muted></video>
         <canvas id="captureCanvas" hidden></canvas>
+
         <div id="scanFrame" class="scan-frame" aria-hidden="true">
           <div class="corner tl"></div><div class="corner tr"></div>
           <div class="corner bl"></div><div class="corner br"></div>
-          <div class="scan-label">KENNZEICHEN HIER</div>
+          <div class="scan-label">OCR-BEREICH</div>
         </div>
+
+        <div id="focusRing" class="focus-ring" hidden aria-hidden="true"></div>
+
+        <div id="cameraHud" class="camera-hud" hidden>
+          <span id="cameraResolution">—</span>
+          <span id="cameraZoomMode">Zoom —</span>
+        </div>
+
         <div id="hitOverlay" class="hit-overlay" hidden>
           <div class="hit-kicker">TREFFER</div>
           <div id="hitPlate" class="hit-plate">NB-BC 721</div>
         </div>
+
         <div id="placeholder" class="camera-placeholder">
           <div class="camera-icon">◉</div>
           <div>Kamera noch nicht gestartet</div>
         </div>
+      </div>
+
+      <div class="camera-controls">
+        <div class="camera-control-row">
+          <div class="camera-control-head">
+            <label for="zoomSlider">Zoom</label>
+            <output id="zoomValue" for="zoomSlider">1,0×</output>
+          </div>
+          <input id="zoomSlider" class="range" type="range" min="1" max="4" step="0.1" value="1" disabled />
+          <small id="zoomSupport">Wird nach Kamerastart geprüft.</small>
+        </div>
+
+        <div class="focus-controls">
+          <div>
+            <strong>Fokus</strong>
+            <small id="focusStatus">Nach dem Start ins Kamerabild tippen.</small>
+          </div>
+          <button id="autoFocusBtn" class="button compact secondary" type="button" disabled>Auto-Fokus</button>
+        </div>
+
+        <div id="manualFocusGroup" class="camera-control-row" hidden>
+          <div class="camera-control-head">
+            <label for="focusSlider">Manueller Fokus</label>
+            <output id="focusValue" for="focusSlider">—</output>
+          </div>
+          <input id="focusSlider" class="range" type="range" min="0" max="1" step="0.01" value="0.5" />
+        </div>
+
+        <div class="camera-note">Der grüne Rahmen zeigt exakt den Bereich, der auf das Kennzeichen geprüft wird. Tippe ins Livebild, um dort zu fokussieren.</div>
       </div>
     </section>
 
@@ -74,7 +113,7 @@
         <button id="startBtn" class="button primary" type="button">Scan starten</button>
         <button id="stopBtn" class="button danger" type="button" disabled>Stoppen</button>
       </div>
-      <div id="errorBox" hidden style="margin-top:12px;padding:12px;border-radius:10px;background:#3a1414;color:#ffd9d9;font-weight:600;white-space:pre-wrap"></div>
+      <div id="errorBox" class="error-box" hidden></div>
 
       <details class="advanced">
         <summary>Feineinstellungen</summary>
