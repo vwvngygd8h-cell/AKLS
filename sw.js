@@ -1,12 +1,6 @@
-const CACHE = 'kennzeichen-waechter-v6';
-const LOCAL = ['./', './index.html', './styles.css', './app.js', './manifest.webmanifest', './icon.svg'];
-self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((c) => c.addAll(LOCAL))));
-self.addEventListener('activate', (event) => event.waitUntil((async () => {
-  const keys = await caches.keys();
-  await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
-  await self.clients.claim();
-})()));
-self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
-});
+const CACHE = 'akls-v7';
+const LOCAL = ['./','./index.html','./styles.css?v=7','./app.js?v=7','./manifest.webmanifest','./icon.svg','./icon-512.png','./apple-touch-icon.png'];
+self.addEventListener('install',(event)=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await cache.addAll(LOCAL);await self.skipWaiting();})());});
+self.addEventListener('activate',(event)=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter((key)=>key!==CACHE).map((key)=>caches.delete(key)));await self.clients.claim();})());});
+self.addEventListener('message',(event)=>{if(event.data?.type==='SKIP_WAITING')self.skipWaiting();});
+self.addEventListener('fetch',(event)=>{if(event.request.method!=='GET')return;const url=new URL(event.request.url);if(event.request.mode==='navigate'){event.respondWith((async()=>{try{const fresh=await fetch(event.request,{cache:'no-store'});const cache=await caches.open(CACHE);cache.put('./index.html',fresh.clone());return fresh;}catch(_){return(await caches.match('./index.html'))||(await caches.match('./'));}})());return;}if(url.origin===self.location.origin){event.respondWith((async()=>{try{const fresh=await fetch(event.request,{cache:'no-store'});const cache=await caches.open(CACHE);cache.put(event.request,fresh.clone());return fresh;}catch(_){return(await caches.match(event.request))||Response.error();}})());}});

@@ -1,12 +1,17 @@
 {
-  "name": "Kennzeichen-Wächter",
-  "short_name": "Kennzeichen",
-  "description": "Lokale Live-Kennzeichenerkennung mit Trefferalarm und KI-Foto-Hinweisen.",
+  "id": "./",
+  "name": "AKLS Kennzeichen-Wächter",
+  "short_name": "AKLS",
+  "description": "Live-Kennzeichenerkennung mit Trefferalarm und Fahrzeug-KI.",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "browser"],
+  "orientation": "portrait-primary",
   "background_color": "#080a0d",
-  "theme_color": "#0b0d10",
+  "theme_color": "#090b0e",
   "icons": [
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
 }

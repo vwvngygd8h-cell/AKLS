@@ -3,223 +3,140 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b0d10" />
+  <meta name="theme-color" content="#090b0e" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Kennzeichen" />
-  <title>Kennzeichen-Wächter</title>
+  <meta name="apple-mobile-web-app-title" content="AKLS" />
+  <title>AKLS Kennzeichen-Wächter</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=7" />
+  <link rel="stylesheet" href="styles.css?v=7" />
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
-  <script defer src="app.js?v=6"></script>
+  <script defer src="app.js?v=7"></script>
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
-      <div>
-        <div class="eyebrow">LIVE-ERKENNUNG</div>
-        <h1>Kennzeichen-Wächter</h1>
-      </div>
+      <div><div class="eyebrow">AKLS · V7</div><h1>Kennzeichen-Wächter</h1></div>
       <div id="statusPill" class="status-pill idle">Bereit</div>
     </header>
 
-    <section class="camera-card">
-      <div id="cameraStage" class="camera-stage" aria-label="Live-Kamerabild">
-        <video id="video" playsinline muted></video>
-        <canvas id="captureCanvas" hidden></canvas>
-        <canvas id="vehicleCanvas" hidden></canvas>
+    <nav id="tabBar" class="tabbar" aria-label="Ansichten">
+      <button class="tab-button active" type="button" data-view="setupView">Einstellungen</button>
+      <button class="tab-button" type="button" data-view="scanView">Scan</button>
+      <button class="tab-button" type="button" data-view="logView">Protokoll</button>
+    </nav>
 
-        <div id="scanFrame" class="scan-frame" aria-hidden="true">
-          <div class="corner tl"></div><div class="corner tr"></div>
-          <div class="corner bl"></div><div class="corner br"></div>
-          <div class="scan-label">OCR-BEREICH</div>
+    <section id="setupView" class="view active-view">
+      <section class="control-card setup-hero">
+        <div><div class="section-title">Vor dem Start</div><h2>Ziele und Erkennung festlegen</h2><p>Nach dem Start wechselt AKLS automatisch in die reduzierte Kameraansicht.</p></div>
+        <button id="startBtn" class="button primary large" type="button">Scan starten</button>
+      </section>
+
+      <section class="control-card">
+        <label class="field-label" for="targetPlates">Gesuchte Kennzeichen</label>
+        <div class="target-editor">
+          <textarea id="targetPlates" class="plate-input plate-list" rows="4" autocomplete="off" autocapitalize="characters" spellcheck="false">NB-BC 721</textarea>
+          <div class="target-meta"><span id="targetCount">1 Zielkennzeichen</span><span>Ein Kennzeichen pro Zeile</span></div>
+          <button id="testAlarmBtn" class="button secondary" type="button">Alarm testen</button>
         </div>
+      </section>
 
-        <div id="vehicleBoxes" class="vehicle-boxes" aria-hidden="true"></div>
-        <div id="focusRing" class="focus-ring" hidden aria-hidden="true"></div>
-
-        <div id="cameraHud" class="camera-hud" hidden>
-          <span id="cameraResolution">—</span>
-          <span id="cameraZoomMode">Zoom —</span>
+      <section class="control-card">
+        <div class="section-title">Erkennung</div>
+        <div class="settings-row">
+          <label class="switch-row"><input id="tolerantMode" type="checkbox" /><span class="switch"></span><span><strong>Tolerante Kennzeichen-Erkennung</strong><small>Erlaubt 1 OCR-Zeichenfehler</small></span></label>
+          <label class="switch-row"><input id="wakeLockToggle" type="checkbox" checked /><span class="switch"></span><span><strong>Bildschirm wach halten</strong><small>Empfohlen für den Dauerbetrieb</small></span></label>
+          <label class="switch-row"><input id="vehicleAssistToggle" type="checkbox" checked /><span class="switch"></span><span><strong>Fahrzeug-KI</strong><small>Referenzfotos als zusätzlicher Hinweis</small></span></label>
         </div>
-
-        <div id="alertBanner" class="alert-banner" hidden>
-          <div id="alertType" class="alert-type">TREFFER</div>
-          <div id="alertText" class="alert-text">NB-BC 721</div>
-        </div>
-
-        <div id="placeholder" class="camera-placeholder">
-          <div class="camera-icon">◉</div>
-          <div>Kamera noch nicht gestartet</div>
-        </div>
-      </div>
-
-      <div class="camera-controls">
-        <div class="camera-grid">
-          <div class="camera-control-row">
-            <div class="camera-control-head">
-              <label for="zoomSlider">Zoom</label>
-              <output id="zoomValue" for="zoomSlider">1,0×</output>
-            </div>
-            <input id="zoomSlider" class="range" type="range" min="1" max="4" step="0.1" value="1" disabled />
-            <small id="zoomSupport">Wird nach Kamerastart geprüft.</small>
+        <details class="advanced">
+          <summary>Feineinstellungen</summary>
+          <div class="advanced-grid">
+            <label>Scan-Intervall<select id="scanInterval"><option value="0" selected>Maximal</option><option value="100">0,10 s</option><option value="200">0,20 s</option><option value="300">0,30 s</option><option value="500">0,50 s</option><option value="750">0,75 s</option><option value="1000">1,00 s</option></select></label>
+            <label>Scanbereich<select id="roiMode"><option value="center" selected>Mittleres Fenster</option><option value="wide">Breites Fenster</option><option value="full">Ganzes Bild</option></select></label>
+            <label>Foto-Hinweisschwelle<select id="vehicleThreshold"><option value="72">empfindlich</option><option value="78" selected>ausgewogen</option><option value="84">streng</option></select></label>
           </div>
+        </details>
+      </section>
 
-          <div class="preview-card">
-            <div class="preview-title">Scan-Vorschau</div>
-            <canvas id="roiPreview" class="preview-canvas" width="320" height="120"></canvas>
-            <small>So sieht der tatsächlich ausgewertete OCR-Ausschnitt aus.</small>
-          </div>
+      <section class="photo-card">
+        <div class="section-title">Fahrzeugfotos</div>
+        <div class="photo-controls">
+          <label>Fotos gehören zu<select id="photoTargetSelect"></select></label>
+          <label class="file-picker"><span>Fotos hinzufügen</span><input id="vehiclePhotoInput" type="file" accept="image/*" multiple /></label>
         </div>
-
-        <div class="focus-controls">
-          <div>
-            <strong>Fokus</strong>
-            <small id="focusStatus">Nach dem Start ins Kamerabild tippen.</small>
-          </div>
-          <button id="autoFocusBtn" class="button compact secondary" type="button" disabled>Auto-Fokus</button>
-        </div>
-
-        <div id="manualFocusGroup" class="camera-control-row" hidden>
-          <div class="camera-control-head">
-            <label for="focusSlider">Manueller Fokus</label>
-            <output id="focusValue" for="focusSlider">—</output>
-          </div>
-          <input id="focusSlider" class="range" type="range" min="0" max="1" step="0.01" value="0.5" />
-        </div>
-
-        <div class="camera-note">Der grüne Rahmen zeigt exakt den Bereich, der für die Kennzeichen-OCR geprüft wird. Es gibt keinen flächigen roten Treffer-Hintergrund mehr, damit du Fokus und Bildausschnitt jederzeit sehen kannst.</div>
-      </div>
-    </section>
-
-    <section class="control-card">
-      <label class="field-label" for="targetPlates">Gesuchte Kennzeichen</label>
-      <div class="target-editor">
-        <textarea id="targetPlates" class="plate-input plate-list" rows="4" autocomplete="off" autocapitalize="characters" spellcheck="false">NB-BC 721</textarea>
-        <div class="target-meta"><span id="targetCount">1 Zielkennzeichen</span><span>Ein Kennzeichen pro Zeile</span></div>
-        <button id="testAlarmBtn" class="button secondary" type="button">Alarm testen</button>
-      </div>
-
-      <div class="settings-row">
-        <label class="switch-row">
-          <input id="tolerantMode" type="checkbox" />
-          <span class="switch"></span>
-          <span>
-            <strong>Tolerante Kennzeichen-Erkennung</strong>
-            <small>Erlaubt 1 OCR-Zeichenfehler</small>
-          </span>
-        </label>
-        <label class="switch-row">
-          <input id="wakeLockToggle" type="checkbox" checked />
-          <span class="switch"></span>
-          <span>
-            <strong>Bildschirm wach halten</strong>
-            <small>Wenn vom Browser unterstützt</small>
-          </span>
-        </label>
-      </div>
-
-      <div class="button-grid">
-        <button id="startBtn" class="button primary" type="button">Scan starten</button>
-        <button id="stopBtn" class="button danger" type="button" disabled>Stoppen</button>
-      </div>
+        <div id="vehicleAiStatus" class="ai-status">KI-Fahrzeugerkennung wird bei Bedarf geladen.</div>
+        <div id="vehicleRefsSummary" class="refs-summary">Noch keine Referenzfotos.</div>
+        <div id="vehicleRefsGrid" class="refs-grid"><div class="empty-log">Noch keine Referenzfotos.</div></div>
+        <div class="photo-actions"><button id="clearTargetRefsBtn" class="button secondary compact" type="button">Fotos des Ziels löschen</button><button id="clearAllRefsBtn" class="button secondary compact" type="button">Alle Fotos löschen</button></div>
+      </section>
       <div id="errorBox" class="error-box" hidden></div>
+    </section>
 
-      <details class="advanced">
-        <summary>Feineinstellungen</summary>
-        <div class="advanced-grid">
-          <label>
-            Scan-Intervall
-            <select id="scanInterval">
-              <option value="0" selected>Maximal · sofort nächstes Bild</option>
-              <option value="100">mind. 0,10 s</option>
-              <option value="200">mind. 0,20 s</option>
-              <option value="300">mind. 0,30 s</option>
-              <option value="500">mind. 0,50 s</option>
-              <option value="750">mind. 0,75 s</option>
-              <option value="1000">mind. 1,00 s</option>
-            </select>
-          </label>
-          <label>
-            Scanbereich
-            <select id="roiMode">
-              <option value="center" selected>Mittleres Fenster</option>
-              <option value="wide">Breites Fenster</option>
-              <option value="full">Ganzes Bild</option>
-            </select>
-          </label>
-          <label>
-            Foto-Hinweisschwelle
-            <select id="vehicleThreshold">
-              <option value="72">empfindlich</option>
-              <option value="78" selected>ausgewogen</option>
-              <option value="84">streng</option>
-            </select>
-          </label>
+    <section id="scanView" class="view" hidden>
+      <section class="scan-shell">
+        <div class="scan-topline">
+          <div class="scan-targets"><span>Ziele</span><strong id="activeTargets">1</strong></div>
+          <div class="scan-state"><span id="scanPrimaryStatus">Bereit</span></div>
+          <button id="stopBtn" class="button danger compact" type="button" disabled>Stoppen</button>
         </div>
-      </details>
+
+        <section class="camera-card scan-camera-card">
+          <div id="cameraStage" class="camera-stage" aria-label="Live-Kamerabild">
+            <video id="video" playsinline muted></video>
+            <canvas id="captureCanvas" hidden></canvas>
+            <canvas id="vehicleCanvas" hidden></canvas>
+            <canvas id="roiPreview" width="320" height="120" hidden></canvas>
+            <div id="scanFrame" class="scan-frame" aria-hidden="true"><div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div></div>
+            <div id="vehicleBoxes" class="vehicle-boxes" aria-hidden="true"></div>
+            <div id="focusRing" class="focus-ring" hidden aria-hidden="true"></div>
+            <div id="cameraHud" class="camera-hud" hidden><span id="cameraResolution">—</span><span id="cameraZoomMode">Zoom —</span></div>
+            <div id="alertBanner" class="alert-banner" hidden><div id="alertType" class="alert-type">TREFFER</div><div id="alertText" class="alert-text">NB-BC 721</div></div>
+            <div id="placeholder" class="camera-placeholder"><div class="camera-icon">◉</div><div>Scan noch nicht gestartet</div></div>
+          </div>
+
+          <div class="camera-controls scan-controls">
+            <div class="camera-control-row zoom-block">
+              <div class="camera-control-head"><label for="zoomSlider">Zoom</label><output id="zoomValue" for="zoomSlider">1,0×</output></div>
+              <input id="zoomSlider" class="range" type="range" min="1" max="4" step="0.1" value="1" disabled />
+              <small id="zoomSupport">Wird nach Kamerastart geprüft.</small>
+            </div>
+            <div class="focus-controls scan-focus"><div><strong>Fokus</strong><small id="focusStatus">Nach dem Start ins Kamerabild tippen.</small></div><button id="autoFocusBtn" class="button compact secondary" type="button" disabled>Auto</button></div>
+            <div id="manualFocusGroup" class="camera-control-row manual-focus" hidden><div class="camera-control-head"><label for="focusSlider">Manueller Fokus</label><output id="focusValue" for="focusSlider">—</output></div><input id="focusSlider" class="range" type="range" min="0" max="1" step="0.01" value="0.5" /></div>
+          </div>
+        </section>
+
+        <section class="telemetry-card scan-telemetry">
+          <div class="metric"><span>OCR</span><strong id="lastOcr">—</strong></div>
+          <div class="metric"><span>Ziel</span><strong id="closestTarget">—</strong></div>
+          <div class="metric"><span>Match</span><strong id="similarity">—</strong></div>
+          <div class="metric"><span>Foto</span><strong id="vehicleScore">—</strong></div>
+          <div class="metric"><span>Rate</span><strong id="effectiveRate">—</strong></div>
+          <div class="metric"><span>Treffer</span><strong id="hitCount">0</strong></div>
+        </section>
+
+        <details class="advanced scan-details">
+          <summary>Weitere Live-Daten</summary>
+          <section class="telemetry-card details-telemetry">
+            <div class="metric"><span>OCR-Zeit</span><strong id="ocrTime">—</strong></div>
+            <div class="metric"><span>Scans</span><strong id="scanCount">0</strong></div>
+            <div class="metric"><span>Hinweise</span><strong id="hintCount">0</strong></div>
+            <div class="metric"><span>Fahrzeug-KI</span><strong id="vehicleAiMetric">—</strong></div>
+          </section>
+        </details>
+      </section>
     </section>
 
-    <section class="photo-card">
-      <div class="section-title">Fahrzeugfotos als Zusatzhinweis</div>
-      <div class="photo-controls">
-        <label>
-          Fotos gehören zu
-          <select id="photoTargetSelect"></select>
-        </label>
-        <label class="file-picker">
-          <span>Fotos hinzufügen</span>
-          <input id="vehiclePhotoInput" type="file" accept="image/*" multiple />
-        </label>
-      </div>
-
-      <label class="switch-row compact-switch">
-        <input id="vehicleAssistToggle" type="checkbox" checked />
-        <span class="switch"></span>
-        <span>
-          <strong>Foto-Assistenz aktiv</strong>
-          <small>Zeigt einen Hinweis, wenn Fahrzeugbild + OCR zum selben Ziel passen</small>
-        </span>
-      </label>
-
-      <div class="photo-help">V6 nutzt echte KI-Bildmerkmale und erkennt zuerst Fahrzeuge im Kamerabild. Ein Foto-Match löst niemals einen harten Treffer aus: Für einen Hinweis muss die Zuordnung wiederholt stabil sein oder zusätzlich von der OCR gestützt werden.</div>
-      <div id="vehicleAiStatus" class="ai-status">KI-Fahrzeugerkennung wird bei Bedarf geladen.</div>
-
-      <div id="vehicleRefsSummary" class="refs-summary">Noch keine Referenzfotos.</div>
-      <div id="vehicleRefsGrid" class="refs-grid"><div class="empty-log">Noch keine Referenzfotos.</div></div>
-      <div class="photo-actions">
-        <button id="clearTargetRefsBtn" class="button secondary compact" type="button">Fotos für gewähltes Ziel löschen</button>
-        <button id="clearAllRefsBtn" class="button secondary compact" type="button">Alle Fotos löschen</button>
-      </div>
+    <section id="logView" class="view" hidden>
+      <section class="log-card"><div class="section-title">Ereignisprotokoll</div><div id="hitLog" class="hit-log"><div class="empty-log">Noch keine Treffer oder Hinweise.</div></div><button id="clearLogBtn" class="text-button" type="button">Protokoll löschen</button></section>
     </section>
 
-    <section class="telemetry-card">
-      <div class="metric"><span>Letzte OCR</span><strong id="lastOcr">—</strong></div>
-      <div class="metric"><span>Nächstes Ziel</span><strong id="closestTarget">—</strong></div>
-      <div class="metric"><span>Ähnlichkeit</span><strong id="similarity">—</strong></div>
-      <div class="metric"><span>OCR-Zeit</span><strong id="ocrTime">—</strong></div>
-      <div class="metric"><span>Effektive Rate</span><strong id="effectiveRate">—</strong></div>
-      <div class="metric"><span>Foto-Score</span><strong id="vehicleScore">—</strong></div>
-      <div class="metric"><span>Fahrzeug-KI</span><strong id="vehicleAiMetric">—</strong></div>
-      <div class="metric"><span>Scans</span><strong id="scanCount">0</strong></div>
-      <div class="metric"><span>Treffer</span><strong id="hitCount">0</strong></div>
-      <div class="metric"><span>Hinweise</span><strong id="hintCount">0</strong></div>
-      <div class="metric"><span>Ziele aktiv</span><strong id="activeTargets">1</strong></div>
-    </section>
-
-    <section class="log-card">
-      <div class="section-title">Ereignisprotokoll</div>
-      <div id="hitLog" class="hit-log"><div class="empty-log">Noch keine Treffer oder Hinweise.</div></div>
-      <button id="clearLogBtn" class="text-button" type="button">Protokoll löschen</button>
-    </section>
-
-    <footer>
-      Kamera, OCR und Fotovergleich laufen nur, solange diese Seite geöffnet ist. Für die Kamera ist HTTPS erforderlich.
-    </footer>
+    <div id="updateNotice" class="update-notice" hidden><span>Neue AKLS-Version verfügbar</span><button id="reloadUpdateBtn" type="button">Jetzt laden</button></div>
+    <footer>AKLS läuft lokal im Browser. Kamera und Scan funktionieren nur bei geöffneter App.</footer>
   </main>
 </body>
 </html>

@@ -13,7 +13,9 @@
     focus: $('focusSlider'), focusValue: $('focusValue'), cameraHud: $('cameraHud'), cameraResolution: $('cameraResolution'), cameraZoomMode: $('cameraZoomMode'),
     alertBanner: $('alertBanner'), alertType: $('alertType'), alertText: $('alertText'),
     photoTargetSelect: $('photoTargetSelect'), vehiclePhotoInput: $('vehiclePhotoInput'), vehicleAssistToggle: $('vehicleAssistToggle'), vehicleRefsGrid: $('vehicleRefsGrid'), vehicleRefsSummary: $('vehicleRefsSummary'),
-    clearTargetRefsBtn: $('clearTargetRefsBtn'), clearAllRefsBtn: $('clearAllRefsBtn'), vehicleAiStatus: $('vehicleAiStatus'), vehicleAiMetric: $('vehicleAiMetric')
+    clearTargetRefsBtn: $('clearTargetRefsBtn'), clearAllRefsBtn: $('clearAllRefsBtn'), vehicleAiStatus: $('vehicleAiStatus'), vehicleAiMetric: $('vehicleAiMetric'),
+    setupView: $('setupView'), scanView: $('scanView'), logView: $('logView'), tabBar: $('tabBar'), scanPrimaryStatus: $('scanPrimaryStatus'),
+    updateNotice: $('updateNotice'), reloadUpdateBtn: $('reloadUpdateBtn')
   };
 
   const DB_NAME = 'kennzeichen-waechter-v5';
@@ -56,6 +58,10 @@
   const VEHICLE_CLASSES = new Set(['car', 'truck', 'bus', 'motorcycle']);
   const AI_EMBEDDING_VERSION = 'mobilenet-v2-a050-v1';
   const VEHICLE_AI_INTERVAL = 900;
+  const APP_VERSION = '7.0.0';
+  let swRegistration = null;
+  let updateAvailable = false;
+  let reloadingForUpdate = false;
 
   const normalize = (s) => (s || '')
     .toUpperCase()
@@ -214,9 +220,27 @@
     return best;
   }
 
+  function showView(viewId) {
+    [els.setupView, els.scanView, els.logView].forEach((view) => {
+      if (!view) return;
+      const active = view.id === viewId;
+      view.hidden = !active;
+      view.classList.toggle('active-view', active);
+    });
+    document.querySelectorAll('.tab-button').forEach((button) => button.classList.toggle('active', button.dataset.view === viewId));
+    if (viewId === 'logView') renderLog();
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  function setScanningUi(active) {
+    document.body.classList.toggle('scanning', active);
+    document.querySelectorAll('.tab-button[data-view="scanView"]').forEach((button) => button.classList.toggle('scan-live', active));
+  }
+
   function setStatus(text, kind = 'idle') {
     els.status.textContent = text;
     els.status.className = `status-pill ${kind}`;
+    if (els.scanPrimaryStatus) els.scanPrimaryStatus.textContent = text;
   }
 
   function showBanner(kind, type, text, duration = 2200) {
@@ -1069,6 +1093,54 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
   }
 
+  function showUpdateNotice(message = 'Neue AKLS-Version verfügbar') {
+    updateAvailable = true;
+    if (!els.updateNotice) return;
+    const label = els.updateNotice.querySelector('span');
+    if (label) label.textContent = message;
+    els.updateNotice.hidden = false;
+  }
+
+  function applyWaitingWorker() {
+    if (swRegistration?.waiting) {
+      reloadingForUpdate = true;
+      swRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      return true;
+    }
+    return false;
+  }
+
+  async function checkForAppUpdate() {
+    if (!swRegistration) return;
+    try {
+      await swRegistration.update();
+      if (swRegistration.waiting) {
+        if (running) showUpdateNotice('Update bereit · wird nach dem Scan geladen');
+        else applyWaitingWorker();
+      }
+    } catch (err) {
+      console.warn('update check', err);
+    }
+  }
+
+  function watchServiceWorker(registration) {
+    swRegistration = registration;
+    if (registration.waiting) {
+      if (running) showUpdateNotice('Update bereit · wird nach dem Scan geladen');
+      else applyWaitingWorker();
+    }
+    registration.addEventListener('updatefound', () => {
+      const installing = registration.installing;
+      if (!installing) return;
+      installing.addEventListener('statechange', () => {
+        if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+          if (running) showUpdateNotice('Update bereit · wird nach dem Scan geladen');
+          else if (registration.waiting) applyWaitingWorker();
+        }
+      });
+    });
+  }
+
   async function start() {
     if (running) return;
     clearError();
@@ -1078,6 +1150,8 @@
     els.ocrTime.textContent = '—';
     els.start.disabled = true;
     setStatus('Kamera startet …', 'busy');
+    setScanningUi(true);
+    showView('scanView');
 
     try {
       if (!window.isSecureContext) throw new Error('Die Seite läuft nicht in einem sicheren HTTPS-Kontext. Öffne die GitHub-Pages-Adresse direkt in Safari.');
@@ -1164,6 +1238,11 @@
     els.vehiclePhotoInput.disabled = false;
     await releaseWakeLock();
     setStatus('Bereit', 'idle');
+    setScanningUi(false);
+    showView('setupView');
+    if (updateAvailable) {
+      if (!applyWaitingWorker()) window.location.reload();
+    }
   }
 
   els.start.addEventListener('click', start);
@@ -1226,14 +1305,49 @@
     renderVehicleRefs();
   });
 
+  document.querySelectorAll('.tab-button').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (running && button.dataset.view !== 'scanView') return;
+      showView(button.dataset.view);
+    });
+  });
+  if (els.reloadUpdateBtn) {
+    els.reloadUpdateBtn.addEventListener('click', () => {
+      if (running) {
+        showUpdateNotice('Update bereit · zuerst Scan stoppen');
+        return;
+      }
+      if (!applyWaitingWorker()) window.location.reload();
+    });
+  }
+
   document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible' && running && els.wake.checked) await requestWakeLock();
+    if (document.visibilityState === 'visible') {
+      if (running && els.wake.checked) await requestWakeLock();
+      checkForAppUpdate();
+    }
   });
   window.addEventListener('pagehide', stop);
 
   async function init() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('service worker', err));
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloadingForUpdate) {
+          window.location.reload();
+          return;
+        }
+        updateAvailable = true;
+        if (running) showUpdateNotice('Neue Version aktiv · Neustart nach dem Scan');
+        else window.location.reload();
+      });
+      try {
+        const registration = await navigator.serviceWorker.register('./sw.js?v=7', { updateViaCache: 'none' });
+        watchServiceWorker(registration);
+        setTimeout(checkForAppUpdate, 1200);
+        setInterval(checkForAppUpdate, 60000);
+      } catch (err) {
+        console.warn('service worker', err);
+      }
     }
     const savedTargets = localStorage.getItem('plateTargets');
     if (savedTargets && savedTargets.trim()) els.targets.value = savedTargets;
@@ -1244,6 +1358,7 @@
     updateRoiFrame();
     renderLog();
     renderVehicleRefs();
+    showView('setupView');
   }
 
   init();
