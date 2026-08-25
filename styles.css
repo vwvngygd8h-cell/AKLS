@@ -4,3 +4,19 @@
 
 /* V9: mehrere gleichzeitig verfolgte Kennzeichenboxen */
 .plate-box{will-change:left,top,width,height}.plate-box.green{border-width:3px}.plate-box.yellow{opacity:.96}.plate-box.red{z-index:4}
+
+/* V9.1 iOS camera visibility fix */
+.camera-stage video{
+  display:block !important;
+  visibility:visible !important;
+  opacity:1 !important;
+  z-index:1;
+  background:#020304;
+  transform:translateZ(0);
+  -webkit-transform:translateZ(0);
+}
+.plate-overlay,.scan-guide{z-index:2}
+.camera-placeholder{z-index:3}
+.camera-placeholder[hidden],
+.alert-banner[hidden]{display:none !important}
+.camera-stage.camera-live .camera-placeholder{display:none !important}

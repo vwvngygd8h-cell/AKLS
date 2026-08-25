@@ -15,7 +15,7 @@ const els = {
   setupView:$('setupView'), scanView:$('scanView'), logView:$('logView')
 };
 
-const APP_VERSION = '9.0.0';
+const APP_VERSION = '9.1.0';
 const LOG_KEY = 'akls-v9-log';
 const TARGET_KEY = 'plateTargetsV9';
 const DETECT_INTERVAL = 120;
@@ -622,10 +622,31 @@ async function start(){
       audio:false
     });
     els.video.srcObject=stream;
+
+    // iOS/PWA: wait until the stream has real dimensions before showing scan view.
+    if (els.video.readyState < 1 || !els.video.videoWidth) {
+      await new Promise((resolve, reject) => {
+        const timeout=setTimeout(()=>reject(new Error('Kamerabild wurde nicht bereitgestellt.')),5000);
+        const ready=()=>{clearTimeout(timeout);els.video.removeEventListener('loadedmetadata',ready);resolve();};
+        els.video.addEventListener('loadedmetadata',ready,{once:true});
+      });
+    }
+
+    els.video.muted=true;
+    els.video.playsInline=true;
+    els.video.setAttribute('playsinline','');
+    els.video.setAttribute('webkit-playsinline','');
     await els.video.play();
+
     running=true;
     tracks=[];
+    els.video.hidden=false;
+    els.video.style.display='block';
+    els.video.style.visibility='visible';
+    els.video.style.opacity='1';
     els.placeholder.hidden=true;
+    els.placeholder.style.display='none';
+    els.stage.classList.add('camera-live');
     els.start.disabled=true;
     els.stop.disabled=false;
     showView('scanView');
@@ -647,7 +668,10 @@ async function stop(back=true){
   scanTimer=detectorTimer=null; busy=false;
   stream?.getTracks().forEach(t=>t.stop());
   stream=null; els.video.srcObject=null;
-  els.placeholder.hidden=false; els.start.disabled=false; els.stop.disabled=true;
+  els.stage.classList.remove('camera-live');
+  els.placeholder.hidden=false;
+  els.placeholder.style.display='';
+  els.start.disabled=false; els.stop.disabled=true;
   tracks=[]; els.overlay.innerHTML=''; els.banner.hidden=true;
   await releaseWake();
   setStatus('Bereit','idle');
@@ -705,7 +729,7 @@ async function initServiceWorker(){
     reloading=true; location.reload();
   });
   try{
-    const reg=await navigator.serviceWorker.register('./sw.js?v=9',{updateViaCache:'none'});
+    const reg=await navigator.serviceWorker.register('./sw.js?v=91',{updateViaCache:'none'});
     setTimeout(()=>reg.update().catch(()=>{}),1500);
     setInterval(()=>reg.update().catch(()=>{}),120000);
   }catch(e){console.warn('service worker',e)}
