@@ -18,13 +18,15 @@ const els={
   manualFocusGroup:$('manualFocusGroup'),focus:$('focusSlider'),focusValue:$('focusValue')
 };
 
-const APP_VERSION='9.4.0';
+const APP_VERSION='9.4.1';
 const MODEL_URL='https://raw.githubusercontent.com/MikeLud/Blue-Iris-Custom-AI-Models/main/Custom-YOLOv8-11/plates.onnx';
 const MODEL_SIZE=640;
-const DETECT_CONF=.36;
-const NMS_IOU=.42;
-const DETECT_EVERY_MS=320;
-const TRACK_TTL=1250;
+const DETECT_CONF=.80;
+const NMS_IOU=.70;
+const DETECT_EVERY_MS=280;
+const TRACK_TTL=850;
+const YELLOW_CONFIRMATIONS=3;
+const MAX_VISIBLE_PLATES=2;
 const GREEN_CONFIRMATIONS=2;
 const RED_CONFIRMATIONS=2;
 const LOG_KEY='akls-v94-log';
@@ -153,7 +155,17 @@ function parseYolo(output,prep){
     const x1=(cx-w/2-prep.padX)/prep.scale;
     const y1=(cy-h/2-prep.padY)/prep.scale;
     const bw=w/prep.scale,bh=h/prep.scale;
-    if(bw<18||bh<7)continue;
+    if(bw<20||bh<7)continue;
+
+    const ratio=bw/Math.max(1,bh);
+    const areaRatio=(bw*bh)/(prep.crop.w*prep.crop.h);
+
+    // Standard-Kennzeichen sind horizontal und nehmen im normalen
+    // Frontscheibenbild nur einen kleinen Teil der ROI ein.
+    if(ratio<1.8||ratio>7.5)continue;
+    if(areaRatio<0.00012||areaRatio>0.10)continue;
+    if(bw>prep.crop.w*.72||bh>prep.crop.h*.30)continue;
+
     dets.push({
       x:clamp(prep.crop.x+x1,prep.crop.x,prep.crop.x+prep.crop.w-1),
       y:clamp(prep.crop.y+y1,prep.crop.y,prep.crop.y+prep.crop.h-1),
@@ -167,7 +179,7 @@ function parseYolo(output,prep){
   for(const d of dets){
     if(keep.some(k=>iou(k,d)>NMS_IOU))continue;
     keep.push(d);
-    if(keep.length>=4)break;
+    if(keep.length>=MAX_VISIBLE_PLATES)break;
   }
   return keep;
 }
@@ -185,13 +197,30 @@ function updateTracks(dets){
     let bi=-1,bs=0;
     dets.forEach((d,i)=>{if(!unmatched.has(i))return;const s=iou(t.box,d);if(s>bs){bs=s;bi=i}});
     if(bi>=0&&bs>.18){
-      const d=dets[bi];t.box=smooth(t.box,d);t.conf=d.conf;t.lastSeen=now;unmatched.delete(bi);
+      const d=dets[bi];
+      t.box=smooth(t.box,d);
+      t.conf=d.conf;
+      t.lastSeen=now;
+      t.confirmations=Math.min(10,(t.confirmations||1)+1);
+      t.misses=0;
+      unmatched.delete(bi);
+    }else{
+      t.misses=(t.misses||0)+1;
     }
   }
+
   for(const i of unmatched){
-    const d=dets[i];tracks.push({id:nextTrackId++,box:{...d},conf:d.conf,lastSeen:now,state:'yellow',label:'Kennzeichen erkannt',history:[],lastOcrAt:0,greenUntil:0,redUntil:0});
+    const d=dets[i];
+    tracks.push({
+      id:nextTrackId++,box:{...d},conf:d.conf,lastSeen:now,
+      state:'pending',label:'Kennzeichen erkannt',history:[],lastOcrAt:0,
+      greenUntil:0,redUntil:0,confirmations:1,misses:0
+    });
   }
-  tracks=tracks.filter(t=>now-t.lastSeen<TRACK_TTL);
+
+  tracks=tracks.filter(t=>now-t.lastSeen<TRACK_TTL && (t.misses||0)<3);
+  tracks.sort((a,b)=>(b.confirmations||0)-(a.confirmations||0)||b.conf-a.conf);
+  if(tracks.length>MAX_VISIBLE_PLATES)tracks=tracks.slice(0,MAX_VISIBLE_PLATES);
   renderTracks();
 }
 function sourceToStage(b){
@@ -205,7 +234,12 @@ function renderTracks(){
   const ids=new Set(tracks.map(t=>String(t.id)));
   [...els.overlay.querySelectorAll('.plate-box')].forEach(d=>{if(!ids.has(d.dataset.id))d.remove()});
   for(const t of tracks){
-    if(t.redUntil>now)t.state='red';else if(t.greenUntil>now)t.state='green';else t.state='yellow';
+    if(t.redUntil>now)t.state='red';
+    else if(t.greenUntil>now)t.state='green';
+    else if((t.confirmations||0)>=YELLOW_CONFIRMATIONS)t.state='yellow';
+    else t.state='pending';
+
+    if(t.state==='pending')continue;
     const p=sourceToStage(t.box);if(!p)continue;
     let d=els.overlay.querySelector(`.plate-box[data-id="${t.id}"]`);
     if(!d){d=document.createElement('div');d.dataset.id=String(t.id);d.innerHTML='<span class="plate-label"></span>';els.overlay.appendChild(d)}
@@ -290,7 +324,7 @@ function targetVote(t){
 async function scheduleOcr(){
   if(!running||ocrBusy)return;
   const now=Date.now();
-  const live=tracks.filter(t=>now-t.lastSeen<800).sort((a,b)=>(now-b.lastOcrAt)-(now-a.lastOcrAt)||b.conf-a.conf);
+  const live=tracks.filter(t=>now-t.lastSeen<650 && (t.confirmations||0)>=YELLOW_CONFIRMATIONS).sort((a,b)=>(now-b.lastOcrAt)-(now-a.lastOcrAt)||b.conf-a.conf);
   const t=live[0];if(!t)return;
   ocrBusy=true;t.lastOcrAt=now;
   const started=performance.now();
@@ -387,7 +421,7 @@ document.addEventListener('visibilitychange',async()=>{if(document.visibilitySta
 async function initServiceWorker(){
   if(!('serviceWorker'in navigator))return;let reloading=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading)return;if(running){pendingReload=true;return}reloading=true;location.reload()});
-  try{const reg=await navigator.serviceWorker.register('./sw.js?v=94',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
+  try{const reg=await navigator.serviceWorker.register('./sw.js?v=941',{updateViaCache:'none'});setTimeout(()=>reg.update().catch(()=>{}),1500);setInterval(()=>reg.update().catch(()=>{}),120000)}catch(e){console.warn(e)}
 }
 const saved=localStorage.getItem(TARGET_KEY)||localStorage.getItem('plateTargetsV93')||localStorage.getItem('plateTargetsV9')||localStorage.getItem('plateTargetsV8')||localStorage.getItem('plateTargets');
 if(saved)els.targets.value=saved;
